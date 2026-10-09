@@ -1,10 +1,45 @@
 version: '3.8'
 
 services:
+  # BebshaOS NestJS API
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bebshaos_api
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/bebshaos?schema=public
+      - REDIS_URL=redis://redis:6379
+      - CORS_ORIGINS=http://localhost:3000,http://localhost:3001
+      - JWT_ACCESS_SECRET=local-dev-jwt-access-secret-32-chars-min
+      - JWT_REFRESH_SECRET=local-dev-jwt-refresh-secret-32-chars-min
+      - OTP_HASH_SECRET=local-dev-otp-hash-secret-32-chars-min
+      - EMAIL_PROVIDER=console
+      - EMAIL_FROM=noreply@bebshaos.local
+      - THROTTLE_TTL=60000
+      - THROTTLE_LIMIT=100
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # Local PostgreSQL instance (strictly isolated, NEVER connects to Neon/production)
   postgres:
     image: postgres:15-alpine
     container_name: bebshaos_postgres
-    restart: always
+    restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -19,12 +54,15 @@ services:
       timeout: 5s
       retries: 5
 
+  # Local Redis instance for BullMQ background queues and caching
   redis:
     image: redis:7-alpine
     container_name: bebshaos_redis
-    restart: always
+    restart: unless-stopped
     ports:
       - '6379:6379'
+    volumes:
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -33,3 +71,4 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:

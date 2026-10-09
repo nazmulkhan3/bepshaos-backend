@@ -89,38 +89,43 @@ describe('Subscription & Billing API Integration', () => {
 
       const res = await planController.getPlanByCode('PRO');
       expect(res.success).toBe(true);
-      expect(res.data.code).toBe('PRO');
+      expect((res.data as any)?.code).toBe('PRO');
     });
   });
 
   describe('SubscriptionController (Tenant API)', () => {
     it('should get current subscription with plan limits', async () => {
-      const mockSub = {
-        id: 'sub-1',
-        status: 'ACTIVE',
-        plan: { code: 'PRO', maxProducts: 500 },
+      const mockResult = {
+        subscription: {
+          id: 'sub-1',
+          status: 'ACTIVE',
+          plan: { code: 'PRO', maxProducts: 500 },
+        },
+        usage: {
+          organizationId: 'org-1',
+          planCode: 'PRO',
+          quotas: {} as any,
+        },
       };
-      subscriptionService.getCurrentSubscription.mockResolvedValueOnce(mockSub);
+      subscriptionService.getCurrentSubscription.mockResolvedValueOnce(mockResult);
 
       const res = await subController.getCurrentSubscription('org-1');
       expect(res.success).toBe(true);
-      expect(res.data.status).toBe('ACTIVE');
+      expect(res.data.subscription.status).toBe('ACTIVE');
     });
 
     it('should get current resource usage vs quotas', async () => {
       const mockUsage = {
-        organizationId: 'org-1',
-        planCode: 'PRO',
-        quotas: {
-          products: { current: 42, max: 500, allowed: true },
-          staff: { current: 2, max: 5, allowed: true },
-        },
+        branches: { used: 1, limit: 1 },
+        staff: { used: 2, limit: 5 },
+        products: { used: 42, limit: 500 },
+        transactions: { used: 10, limit: 500, periodStart: new Date(), periodEnd: new Date() },
       };
       limitService.getSubscriptionUsage.mockResolvedValueOnce(mockUsage);
 
       const res = await subController.getUsage('org-1');
       expect(res.success).toBe(true);
-      expect(res.data.quotas.products.current).toBe(42);
+      expect(res.data.products.used).toBe(42);
     });
 
     it('should handle trial activation', async () => {
@@ -131,7 +136,7 @@ describe('Subscription & Billing API Integration', () => {
       };
       subscriptionService.startTrial.mockResolvedValueOnce(mockTrialRes);
 
-      const res = await subController.startTrial('org-1', { planCode: 'PRO' }, { user: { sub: 'u-1' } } as any);
+      const res = await subController.startTrial('org-1', { planCode: 'PRO' });
       expect(res.success).toBe(true);
       expect(res.data.status).toBe('TRIAL');
     });
