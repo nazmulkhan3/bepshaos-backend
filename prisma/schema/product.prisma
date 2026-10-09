@@ -1,0 +1,227 @@
+model Customer {
+  id             String         @id @default(uuid())
+  organizationId String
+  branchId       String?
+  customerCode   String
+  name           String
+  avatar         String?
+  phone          String?
+  alternatePhone String?
+  email          String?
+  address        String?
+  openingBalance Decimal        @default(0) @db.Decimal(19, 4)
+  creditLimit    Decimal        @default(0) @db.Decimal(19, 4)
+  notes          String?
+  status         CustomerStatus @default(ACTIVE)
+
+  // Offline Sync fields
+  clientId        String?  @unique
+  serverCreatedAt DateTime @default(now())
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // Soft delete
+
+  organization    Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch          Branch?            @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  sales           Sale[]
+  journalLines    JournalEntryLine[]
+  addresses       CustomerAddress[]
+  payments        Payment[]
+
+  @@unique([organizationId, customerCode])
+  @@index([organizationId, phone])
+}
+
+model CustomerAddress {
+  id           String  @id @default(uuid())
+  customerId   String
+  label        String?
+  addressLine1 String
+  addressLine2 String?
+  area         String?
+  city         String?
+  district     String?
+  postalCode   String?
+  country      String  @default("Bangladesh")
+  isDefault    Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+}
+
+model Supplier {
+  id             String  @id @default(uuid())
+  organizationId String
+  branchId       String?
+  supplierCode   String
+  name           String
+  companyName    String?
+  avatar         String?
+  phone          String?
+  alternatePhone String?
+  email          String?
+  website        String?
+  taxNumber      String?
+
+  notes  String?
+  status SupplierStatus @default(ACTIVE)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // Soft delete
+
+  organization    Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch          Branch?            @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  purchases       Purchase[]
+  journalLines    JournalEntryLine[]
+  addresses       SupplierAddress[]
+  payments        Payment[]
+
+  @@unique([organizationId, supplierCode])
+  @@index([organizationId, phone])
+  @@index([organizationId, status])
+  @@index([organizationId, createdAt])
+}
+
+model SupplierAddress {
+  id           String  @id @default(uuid())
+  supplierId   String
+  label        String?
+  addressLine1 String
+  addressLine2 String?
+  area         String?
+  city         String?
+  district     String?
+  postalCode   String?
+  country      String  @default("Bangladesh")
+  isDefault    Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@index([supplierId])
+}
+
+model Category {
+  id             String         @id @default(uuid())
+  organizationId String
+  name           String
+  slug           String
+  description    String?
+  parentId       String?
+  status         CategoryStatus @default(ACTIVE)
+
+  // Offline Sync fields
+  clientId        String?  @unique
+  serverCreatedAt DateTime @default(now())
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // Soft delete
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parent       Category?    @relation("SubCategories", fields: [parentId], references: [id], onDelete: Restrict)
+  children     Category[]   @relation("SubCategories")
+  products     Product[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId, parentId])
+  @@index([organizationId, status])
+  @@index([organizationId, createdAt])
+}
+
+model Product {
+  id             String        @id @default(uuid())
+  organizationId String
+  categoryId     String?
+  name           String
+  sku            String?
+  barcode        String?
+  brand          String?
+  unit           String        @default("pcs")
+  purchasePrice  Decimal       @default(0) @db.Decimal(19, 4)
+  sellingPrice   Decimal       @default(0) @db.Decimal(19, 4)
+  taxRate        Decimal       @default(0) @db.Decimal(5, 2)
+  minStock       Int           @default(0)
+  status         ProductStatus @default(ACTIVE)
+
+  // Offline Sync fields
+  clientId        String?  @unique
+  serverCreatedAt DateTime @default(now())
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // Soft delete
+
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category           Category?           @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  inventories        Inventory[]
+  inventoryMovements InventoryMovement[]
+  saleItems          SaleItem[]
+  purchaseItems      PurchaseItem[]
+
+  @@unique([organizationId, sku])
+  @@unique([organizationId, barcode])
+  @@index([organizationId, categoryId])
+  @@index([organizationId, status])
+  @@index([organizationId, createdAt])
+}
+
+model Inventory {
+  id               String  @id @default(uuid())
+  organizationId   String
+  branchId         String
+  productId        String
+  quantity         Decimal @default(0) @db.Decimal(19, 4) // Decimal in case of fractional units (kg, L)
+  reservedQuantity Decimal @default(0) @db.Decimal(19, 4)
+
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch       Branch       @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  product      Product      @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, branchId, productId])
+  @@index([organizationId])
+  @@index([organizationId, branchId])
+  @@index([organizationId, productId])
+  @@index([organizationId, updatedAt])
+}
+
+model InventoryMovement {
+  id             String                @id @default(uuid())
+  organizationId String
+  branchId       String
+  productId      String
+  movementType   InventoryMovementType
+  referenceType  String? // e.g. "SALE", "PURCHASE", "ADJUSTMENT"
+  referenceId    String?
+  idempotencyKey String?
+  quantity       Decimal               @db.Decimal(19, 4)
+  beforeQuantity Decimal               @db.Decimal(19, 4)
+  afterQuantity  Decimal               @db.Decimal(19, 4)
+  note           String?
+  createdBy      String? // userId
+
+  createdAt DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch       Branch       @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  product      Product      @relation(fields: [productId], references: [id], onDelete: Restrict)
+  user         User?        @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId])
+  @@index([organizationId, branchId])
+  @@index([organizationId, productId])
+  @@index([organizationId, createdAt])
+  @@index([organizationId, movementType])
+}

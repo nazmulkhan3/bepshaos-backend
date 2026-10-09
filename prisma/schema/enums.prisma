@@ -1,0 +1,148 @@
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum CustomerStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum SupplierStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum OrganizationStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum MemberStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum BranchStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum CategoryStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum ProductStatus {
+  ACTIVE
+  INACTIVE
+  DISCONTINUED
+}
+
+enum SaleStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+  REFUNDED
+}
+
+enum PurchaseStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+  RETURNED
+}
+
+enum PaymentStatus {
+  COMPLETED
+  VOIDED
+}
+
+enum ExpenseStatus {
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentDirection {
+  RECEIVED
+  PAID
+}
+
+enum PaymentMethod {
+  CASH
+  BANK
+  BKASH
+  NAGAD
+  CARD
+  OTHER
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  TRIAL
+  EXPIRED
+  CANCELLED
+  PAST_DUE
+}
+
+enum InventoryMovementType {
+  STOCK_IN
+  STOCK_OUT
+  SALE
+  PURCHASE
+  ADJUSTMENT
+  TRANSFER
+  DAMAGE
+  RETURN
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Phase 15 — Double-Entry Ledger Enums
+// ──────────────────────────────────────────────────────────────────────────────
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+enum AccountCategory {
+  // ASSET
+  CASH
+  BANK
+  ACCOUNTS_RECEIVABLE
+  INVENTORY
+
+  // LIABILITY
+  ACCOUNTS_PAYABLE
+
+  // EQUITY
+  OWNER_EQUITY
+
+  // REVENUE
+  SALES_REVENUE
+
+  // EXPENSE
+  GENERAL_EXPENSE
+}
+
+enum JournalEntryStatus {
+  POSTED
+  REVERSED
+}
+
+enum JournalSourceType {
+  SALE
+  PURCHASE
+  CUSTOMER_PAYMENT
+  SUPPLIER_PAYMENT
+  EXPENSE
+  MANUAL
+}

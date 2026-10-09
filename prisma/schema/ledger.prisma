@@ -1,0 +1,91 @@
+// ──────────────────────────────────────────────────────────────────────────────
+// Phase 15 — Double-Entry Ledger Schema
+// ──────────────────────────────────────────────────────────────────────────────
+
+model Account {
+  id             String          @id @default(uuid())
+  organizationId String
+  code           String          // e.g. "1000", "1100"
+  name           String          // e.g. "Cash", "Accounts Receivable"
+  type           AccountType
+  category       AccountCategory
+  parentId       String?
+  isSystem       Boolean         @default(false) // System accounts cannot be deleted
+  isActive       Boolean         @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parent       Account?         @relation("AccountHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children     Account[]        @relation("AccountHierarchy")
+  journalLines JournalEntryLine[]
+  expenseCategories ExpenseCategory[]
+  expensesPaid Expense[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([organizationId, type])
+  @@index([organizationId, category])
+}
+
+model JournalEntry {
+  id             String             @id @default(uuid())
+  organizationId String
+  branchId       String?
+  entryNumber    String             // e.g. "JE-000001"
+  entryDate      DateTime           @default(now())
+  description    String
+  sourceType     JournalSourceType
+  sourceId       String?            // ID of the source business event (Sale ID, Payment ID, etc.)
+  status         JournalEntryStatus @default(POSTED)
+  idempotencyKey String?
+  requestHash    String?
+  createdBy      String?
+  reversedById   String?            // Points to the reversal entry that reversed THIS entry
+  reversalOfId   String?            // Points to the original entry this entry reverses
+
+  createdAt DateTime @default(now())
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch       Branch?           @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  creator      User?             @relation("JournalCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  reversedBy   JournalEntry?     @relation("ReversedBy", fields: [reversedById], references: [id])
+  reversedByOf JournalEntry[]    @relation("ReversedBy")
+  reversalOf   JournalEntry?     @relation("ReversalOf", fields: [reversalOfId], references: [id])
+  reversals    JournalEntry[]    @relation("ReversalOf")
+  lines        JournalEntryLine[]
+
+  // Enforce exactly one journal per source event (excluding MANUAL entries)
+  @@unique([organizationId, entryNumber])
+  @@unique([organizationId, idempotencyKey])
+  @@unique([organizationId, sourceType, sourceId])
+  @@index([organizationId])
+  @@index([organizationId, branchId])
+  @@index([organizationId, sourceType, sourceId])
+  @@index([organizationId, status])
+  @@index([organizationId, entryDate])
+}
+
+model JournalEntryLine {
+  id             String   @id @default(uuid())
+  journalEntryId String
+  accountId      String
+  description    String?
+  debit          Decimal  @default(0) @db.Decimal(19, 4)
+  credit         Decimal  @default(0) @db.Decimal(19, 4)
+  customerId     String?  // For AR tracking
+  supplierId     String?  // For AP tracking
+
+  createdAt DateTime @default(now())
+
+  journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  account      Account      @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  customer     Customer?    @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  supplier     Supplier?    @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+
+  @@index([journalEntryId])
+  @@index([accountId])
+  @@index([customerId])
+  @@index([supplierId])
+}

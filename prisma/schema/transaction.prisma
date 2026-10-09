@@ -1,0 +1,247 @@
+model Sale {
+  id             String     @id @default(uuid())
+  organizationId String
+  branchId       String
+  customerId     String?
+  saleNumber     String
+  invoiceNumber  String?
+  subtotal       Decimal    @default(0) @db.Decimal(19, 4)
+  discountAmount Decimal    @default(0) @map("discount") @db.Decimal(19, 4)
+  taxAmount      Decimal    @default(0) @map("tax") @db.Decimal(19, 4)
+  totalAmount    Decimal    @default(0) @map("total") @db.Decimal(19, 4)
+  paidAmount     Decimal    @default(0) @db.Decimal(19, 4)
+  status         SaleStatus @default(COMPLETED)
+  note           String?
+  idempotencyKey String?
+  requestHash    String?
+  createdBy      String?
+  cancelledAt    DateTime?
+  cancelledBy    String?
+
+  // Offline Sync fields
+  clientId        String?  @unique
+  serverCreatedAt DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch       Branch       @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  customer     Customer?    @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  creator      User?        @relation("SaleCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  canceller    User?        @relation("SaleCancelledBy", fields: [cancelledBy], references: [id], onDelete: SetNull)
+  items        SaleItem[]
+  paymentAllocations PaymentAllocation[]
+
+  @@unique([organizationId, saleNumber])
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId])
+  @@index([organizationId, branchId])
+  @@index([organizationId, customerId])
+  @@index([organizationId, status])
+  @@index([organizationId, createdAt])
+}
+
+model SaleItem {
+  id             String   @id @default(uuid())
+  saleId         String
+  productId      String
+  quantity       Decimal  @db.Decimal(19, 4)
+  unitPrice      Decimal  @db.Decimal(19, 4)
+  discountAmount Decimal  @default(0) @map("discount") @db.Decimal(19, 4)
+  taxAmount      Decimal  @default(0) @map("tax") @db.Decimal(19, 4)
+  lineTotal      Decimal  @db.Decimal(19, 4)
+  createdAt      DateTime @default(now())
+
+  // Offline Sync fields
+  clientId String? @unique
+
+  sale    Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([saleId, productId])
+  @@index([saleId])
+  @@index([productId])
+}
+
+model Purchase {
+  id             String         @id @default(uuid())
+  organizationId String
+  branchId       String
+  supplierId     String?
+  purchaseNumber String
+  subtotal       Decimal        @default(0) @db.Decimal(19, 4)
+  discount       Decimal        @default(0) @db.Decimal(19, 4)
+  tax            Decimal        @default(0) @db.Decimal(19, 4)
+  total          Decimal        @default(0) @db.Decimal(19, 4)
+  paidAmount     Decimal        @default(0) @db.Decimal(19, 4)
+  status         PurchaseStatus @default(COMPLETED)
+  note           String?
+  idempotencyKey String?
+  requestHash    String?
+  createdBy      String?
+  cancelledAt    DateTime?
+  cancelledBy    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch       Branch         @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  supplier     Supplier?      @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  creator      User?          @relation("PurchaseCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  canceller    User?          @relation("PurchaseCancelledBy", fields: [cancelledBy], references: [id], onDelete: SetNull)
+  items        PurchaseItem[]
+  paymentAllocations PaymentAllocation[]
+
+  @@unique([organizationId, purchaseNumber])
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, supplierId])
+  @@index([organizationId, createdAt])
+}
+
+model PurchaseItem {
+  id         String   @id @default(uuid())
+  purchaseId String
+  productId  String
+  quantity   Decimal  @db.Decimal(19, 4)
+  unitCost   Decimal  @db.Decimal(19, 4)
+  discount   Decimal  @default(0) @db.Decimal(19, 4)
+  tax        Decimal  @default(0) @db.Decimal(19, 4)
+  lineTotal  Decimal  @db.Decimal(19, 4)
+  createdAt  DateTime @default(now())
+
+  purchase Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([purchaseId, productId])
+  @@index([purchaseId])
+  @@index([productId])
+}
+
+model Payment {
+  id             String           @id @default(uuid())
+  organizationId String
+  branchId       String
+  customerId     String?
+  supplierId     String?
+  direction      PaymentDirection
+  paymentNumber  String
+  amount         Decimal          @db.Decimal(19, 4)
+  method         PaymentMethod
+  reference      String?
+  note           String?
+  status         PaymentStatus    @default(COMPLETED)
+  idempotencyKey String?
+  requestHash    String?
+  createdBy      String?
+  voidedAt       DateTime?
+  voidedBy       String?
+
+  // Offline Sync fields
+  clientId        String?  @unique
+  serverCreatedAt DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch       Branch              @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  customer     Customer?           @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  supplier     Supplier?           @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  creator      User?               @relation("PaymentCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  voider       User?               @relation("PaymentVoidedBy", fields: [voidedBy], references: [id], onDelete: SetNull)
+  allocations  PaymentAllocation[]
+
+  @@unique([organizationId, paymentNumber])
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId])
+  @@index([organizationId, branchId])
+  @@index([organizationId, customerId])
+  @@index([organizationId, supplierId])
+  @@index([organizationId, direction])
+  @@index([organizationId, status])
+  @@index([organizationId, createdAt])
+}
+
+model PaymentAllocation {
+  id         String   @id @default(uuid())
+  paymentId  String
+  saleId     String?
+  purchaseId String?
+  amount     Decimal  @db.Decimal(19, 4)
+  createdAt  DateTime @default(now())
+
+  payment  Payment   @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  sale     Sale?     @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  purchase Purchase? @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+
+  @@unique([paymentId, saleId])
+  @@unique([paymentId, purchaseId])
+  @@index([paymentId])
+  @@index([saleId])
+  @@index([purchaseId])
+}
+
+model ExpenseCategory {
+  id               String   @id @default(uuid())
+  organizationId   String
+  name             String
+  code             String
+  description      String?
+  expenseAccountId String
+  isSystem         Boolean  @default(false)
+  isActive         Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  account      Account      @relation(fields: [expenseAccountId], references: [id], onDelete: Restrict)
+  expenses     Expense[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([organizationId, isActive])
+}
+
+model Expense {
+  id               String        @id @default(uuid())
+  organizationId   String
+  branchId         String
+  categoryId       String
+  expenseNumber    String
+  amount           Decimal       @db.Decimal(19, 4)
+  paymentMethod    PaymentMethod
+  paymentAccountId String
+  expenseDate      DateTime
+  description      String?
+  reference        String?
+  note             String?
+  status           ExpenseStatus @default(COMPLETED)
+  idempotencyKey   String?
+  requestHash      String?
+  createdBy        String?
+  cancelledAt      DateTime?
+  cancelledBy      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch         Branch          @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  category       ExpenseCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  paymentAccount Account         @relation(fields: [paymentAccountId], references: [id], onDelete: Restrict)
+  creator        User?           @relation("ExpenseCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  canceller      User?           @relation("ExpenseCancelledBy", fields: [cancelledBy], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, expenseNumber])
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId])
+  @@index([organizationId, branchId])
+  @@index([organizationId, categoryId])
+  @@index([organizationId, status])
+  @@index([organizationId, paymentMethod])
+  @@index([organizationId, expenseDate])
+  @@index([organizationId, createdAt])
+}

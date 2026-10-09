@@ -1,0 +1,133 @@
+model Organization {
+  id     String             @id @default(uuid())
+  name   String
+  slug   String             @unique
+  status OrganizationStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members            OrganizationMember[]
+  roles              Role[]
+  business           Business?
+  branches           Branch[]
+  customers          Customer[]
+  suppliers          Supplier[]
+  categories         Category[]
+  products           Product[]
+  inventories        Inventory[]
+  inventoryMovements InventoryMovement[]
+  sales              Sale[]
+  purchases          Purchase[]
+  payments           Payment[]
+  expenses           Expense[]
+  expenseCategories  ExpenseCategory[]
+  accounts           Account[]
+  journalEntries     JournalEntry[]
+  subscriptions      Subscription[]
+  notifications      Notification[]
+  auditLogs          AuditLog[]
+}
+
+model OrganizationMember {
+  id             String       @id @default(uuid())
+  organizationId String
+  userId         String
+  roleId         String
+  status         MemberStatus @default(ACTIVE)
+  joinedAt       DateTime     @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role         Role         @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, userId])
+}
+
+model Role {
+  id             String  @id @default(uuid())
+  organizationId String? // Null means system-defined default role
+  name           String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization?        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members      OrganizationMember[]
+  permissions  RolePermission[]
+
+  @@unique([organizationId, name])
+}
+
+model Permission {
+  id          String  @id @default(uuid())
+  action      String  @unique // e.g., "customer.create"
+  description String?
+
+  rolePermissions RolePermission[]
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model Business {
+  id             String  @id @default(uuid())
+  organizationId String  @unique
+  name           String
+  legalName      String?
+  logo           String?
+  phone          String?
+  email          String?
+  website        String?
+  address        String?
+  currency       String  @default("BDT")
+  timezone       String  @default("Asia/Dhaka")
+  taxEnabled     Boolean @default(false)
+  taxNumber      String?
+  invoicePrefix  String?
+  invoiceFooter  String?
+  receiptFooter  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model Branch {
+  id             String       @id @default(uuid())
+  organizationId String
+  name           String
+  code           String
+  email          String?
+  address        String?
+  phone          String?
+  status         BranchStatus @default(ACTIVE)
+  isDefault      Boolean      @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customers          Customer[]
+  suppliers          Supplier[]
+  inventories        Inventory[]
+  inventoryMovements InventoryMovement[]
+  sales              Sale[]
+  purchases          Purchase[]
+  payments           Payment[]
+  expenses           Expense[]
+  journalEntries     JournalEntry[]
+
+  @@unique([organizationId, code])
+}

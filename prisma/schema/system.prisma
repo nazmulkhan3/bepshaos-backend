@@ -1,0 +1,70 @@
+model Plan {
+  id              String  @id @default(uuid())
+  name            String  @unique
+  maxBranches     Int     @default(1)
+  maxStaff        Int     @default(1)
+  maxProducts     Int     @default(100)
+  maxTransactions Int     @default(1000)
+  features        Json?
+  price           Decimal @default(0) @db.Decimal(19, 4)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id             String             @id @default(uuid())
+  organizationId String
+  planId         String
+  status         SubscriptionStatus @default(ACTIVE)
+  startDate      DateTime
+  endDate        DateTime?
+  trialEndsAt    DateTime?
+  billingCycle   String             @default("MONTHLY")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  plan         Plan         @relation(fields: [planId], references: [id], onDelete: Restrict)
+}
+
+model Notification {
+  id             String    @id @default(uuid())
+  organizationId String?
+  userId         String
+  type           String
+  title          String
+  message        String
+  metadata       Json?
+  readAt         DateTime?
+
+  createdAt DateTime @default(now())
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+}
+
+model AuditLog {
+  id             String  @id @default(uuid())
+  organizationId String?
+  userId         String?
+  action         String
+  entity         String
+  entityId       String
+  oldData        Json?
+  newData        Json?
+  ipAddress      String?
+  userAgent      String?
+
+  createdAt DateTime @default(now())
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, entity, entityId])
+}

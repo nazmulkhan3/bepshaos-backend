@@ -1,0 +1,56 @@
+model User {
+  id              String     @id @default(uuid())
+  phone           String?    @unique
+  email           String?    @unique
+  password        String?
+  emailVerifiedAt DateTime?
+  name            String
+  avatar          String?
+  status          UserStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessions             Session[]
+  organizationMembers  OrganizationMember[]
+  auditLogs            AuditLog[]
+  notifications        Notification[]
+  expensesCreated      Expense[]            @relation("ExpenseCreatedBy")
+  expensesCancelled    Expense[]            @relation("ExpenseCancelledBy")
+  inventoryMovements   InventoryMovement[]
+  salesCreated         Sale[]               @relation("SaleCreatedBy")
+  salesCancelled       Sale[]               @relation("SaleCancelledBy")
+  purchasesCreated     Purchase[]           @relation("PurchaseCreatedBy")
+  purchasesCancelled   Purchase[]           @relation("PurchaseCancelledBy")
+  paymentsCreated      Payment[]            @relation("PaymentCreatedBy")
+  paymentsVoided       Payment[]            @relation("PaymentVoidedBy")
+  journalEntriesCreated JournalEntry[]      @relation("JournalCreatedBy")
+}
+
+model Session {
+  id               String    @id @default(uuid())
+  userId           String
+  refreshTokenHash String
+  deviceInfo       String?
+  ipAddress        String?
+  expiresAt        DateTime
+  revokedAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Otp {
+  id           String   @id @default(uuid())
+  userId       String?
+  phone        String?
+  email        String?
+  hashedOtp    String
+  expiry       DateTime
+  attemptCount Int      @default(0)
+  isConsumed   Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+}
