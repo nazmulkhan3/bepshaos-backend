@@ -4,6 +4,7 @@ import { ApiTags, ApiOperation, ApiBearerAuth, ApiHeader, ApiResponse } from '@n
 import { OrganizationService } from './organization.service.js';
 import { CreateOrganizationDto } from './dto/create-organization.dto.js';
 import { UpdateOrganizationDto } from './dto/update-organization.dto.js';
+import { AddMemberDto } from './dto/add-member.dto.js';
 import { TenantGuard } from '../../common/guards/tenant.guard.js';
 import { PermissionGuard } from '../../common/guards/permission.guard.js';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator.js';
@@ -102,6 +103,31 @@ export class OrganizationController {
     return {
       success: true,
       data: members,
+    };
+  }
+
+  @Post(':organizationId/members')
+  @UseGuards(TenantGuard, PermissionGuard)
+  @RequirePermissions('member:invite')
+  @ApiHeader({
+    name: 'x-organization-id',
+    description: 'Organization ID',
+    required: false,
+  })
+  @ApiOperation({ summary: 'Add a new member to an organization' })
+  @ApiResponse({ status: 201, description: 'Member added successfully' })
+  async addMember(
+    @Param('organizationId') organizationId: string,
+    @Body() dto: AddMemberDto,
+  ) {
+    const member = await this.organizationService.addMember(
+      organizationId,
+      dto.userId,
+      dto.roleId,
+    );
+    return {
+      success: true,
+      data: member,
     };
   }
 

@@ -23,7 +23,17 @@ export class TenantGuard implements CanActivate {
     }
 
     // Try to get organization ID from headers or params
-    const organizationId = request.headers['x-organization-id'] || request.params.organizationId;
+    const headerOrgId = request.headers['x-organization-id'];
+    const paramOrgId = request.params?.organizationId;
+
+    // IDOR Protection: If both header and URL param are provided, they must match
+    if (headerOrgId && paramOrgId && headerOrgId !== paramOrgId) {
+      throw new BadRequestException(
+        'Organization ID mismatch between x-organization-id header and request path parameters',
+      );
+    }
+
+    const organizationId = paramOrgId || headerOrgId;
 
     if (!organizationId) {
       throw new BadRequestException('Organization ID is required in headers or params');

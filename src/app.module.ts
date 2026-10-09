@@ -35,6 +35,9 @@ import { ReceiptModule } from './modules/receipt/receipt.module.js';
 import { ReportModule } from './modules/report/report.module.js';
 import { NotificationModule } from './modules/notification/notification.module.js';
 import { SubscriptionModule } from './modules/subscription/subscription.module.js';
+import { AuditLogModule } from './modules/audit-log/audit-log.module.js';
+import { AdminModule } from './modules/admin/admin.module.js';
+import { SyncModule } from './modules/sync/sync.module.js';
 
 @Module({
   imports: [
@@ -78,6 +81,9 @@ import { SubscriptionModule } from './modules/subscription/subscription.module.j
     ReportModule,
     NotificationModule,
     SubscriptionModule,
+    AuditLogModule,
+    AdminModule,
+    SyncModule,
   ],
   controllers: [AppController],
   providers: [

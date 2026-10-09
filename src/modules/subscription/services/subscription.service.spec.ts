@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { SubscriptionService } from './subscription.service.js';
 import { SubscriptionLimitService } from './subscription-limit.service.js';
 import { BillingProviderRegistry } from '../billing/billing-provider.registry.js';
+import { AuditLogService } from '../../audit-log/audit-log.service.js';
 import { DatabaseService } from '../../../database/database.service.js';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { SubscriptionStatus, BillingRecordStatus, Prisma } from '@prisma/client';
@@ -59,12 +60,18 @@ describe('SubscriptionService', () => {
       }),
     };
 
+    const mockAuditLogService = {
+      logAction: vi.fn().mockResolvedValue({}),
+      queryLogs: vi.fn().mockResolvedValue({ total: 0, data: [] }),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SubscriptionService,
         { provide: DatabaseService, useValue: db },
         { provide: SubscriptionLimitService, useValue: limitService },
         { provide: BillingProviderRegistry, useValue: providerRegistry },
+        { provide: AuditLogService, useValue: mockAuditLogService },
       ],
     }).compile();
 

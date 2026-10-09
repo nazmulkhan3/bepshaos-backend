@@ -17,6 +17,8 @@ import {
 } from '@prisma/client';
 import { randomBytes } from 'crypto';
 
+import { AuditLogService } from '../../audit-log/audit-log.service.js';
+
 @Injectable()
 export class SubscriptionService {
   private readonly logger = new Logger(SubscriptionService.name);
@@ -25,6 +27,7 @@ export class SubscriptionService {
     private readonly prisma: DatabaseService,
     private readonly limitService: SubscriptionLimitService,
     private readonly providerRegistry: BillingProviderRegistry,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   /**
@@ -106,7 +109,7 @@ export class SubscriptionService {
 
       if (existingSub) {
         // Upgrade existing subscription to trialing
-        return tx.subscription.update({
+        const updated = await tx.subscription.update({
           where: { id: existingSub.id },
           data: {
             planId: targetPlan.id,
@@ -118,10 +121,23 @@ export class SubscriptionService {
           },
           include: { plan: true },
         });
+
+        await this.auditLogService.logAction(
+          {
+            action: 'SUBSCRIPTION_START_TRIAL',
+            entity: 'Subscription',
+            entityId: updated.id,
+            organizationId,
+            newData: { plan: targetPlan.code, trialEndsAt },
+          },
+          tx,
+        );
+
+        return updated;
       }
 
       // Create new trialing subscription
-      return tx.subscription.create({
+      const created = await tx.subscription.create({
         data: {
           organizationId,
           planId: targetPlan.id,
@@ -135,6 +151,19 @@ export class SubscriptionService {
         },
         include: { plan: true },
       });
+
+      await this.auditLogService.logAction(
+        {
+          action: 'SUBSCRIPTION_START_TRIAL',
+          entity: 'Subscription',
+          entityId: created.id,
+          organizationId,
+          newData: { plan: targetPlan.code, trialEndsAt },
+        },
+        tx,
+      );
+
+      return created;
     });
   }
 
@@ -223,6 +252,17 @@ export class SubscriptionService {
           include: { plan: true },
         });
 
+        await this.auditLogService.logAction(
+          {
+            action: 'SUBSCRIPTION_CHANGE_PLAN',
+            entity: 'Subscription',
+            entityId: updated.id,
+            organizationId,
+            newData: { plan: targetPlan.code, billingCycle: 'MONTHLY' },
+          },
+          tx,
+        );
+
         return {
           subscription: updated,
           billingRecord: null,
@@ -283,6 +323,17 @@ export class SubscriptionService {
           },
           include: { plan: true },
         });
+
+        await this.auditLogService.logAction(
+          {
+            action: 'SUBSCRIPTION_UPGRADE_ACTIVE',
+            entity: 'Subscription',
+            entityId: updatedSubscription.id,
+            organizationId,
+            newData: { plan: targetPlan.code, billingCycle, invoiceNumber },
+          },
+          tx,
+        );
       } else {
         // Flag pending upgrade awaiting payment
         updatedSubscription = await tx.subscription.update({
@@ -292,6 +343,17 @@ export class SubscriptionService {
           },
           include: { plan: true },
         });
+
+        await this.auditLogService.logAction(
+          {
+            action: 'SUBSCRIPTION_UPGRADE_PENDING',
+            entity: 'Subscription',
+            entityId: updatedSubscription.id,
+            organizationId,
+            newData: { targetPlan: targetPlan.code, invoiceNumber },
+          },
+          tx,
+        );
       }
 
       return {
@@ -322,7 +384,7 @@ export class SubscriptionService {
         }
 
         const periodEnd = this.calculatePeriodEnd(now, 'MONTHLY');
-        return tx.subscription.update({
+        const updated = await tx.subscription.update({
           where: { id: sub.id },
           data: {
             planId: freePlan.id,
@@ -337,10 +399,23 @@ export class SubscriptionService {
           },
           include: { plan: true },
         });
+
+        await this.auditLogService.logAction(
+          {
+            action: 'SUBSCRIPTION_CANCEL_IMMEDIATE',
+            entity: 'Subscription',
+            entityId: updated.id,
+            organizationId,
+            newData: { plan: freePlan.code, reason: dto.reason },
+          },
+          tx,
+        );
+
+        return updated;
       }
 
       // Period-end cancellation: flag to cancel at period end
-      return tx.subscription.update({
+      const updated = await tx.subscription.update({
         where: { id: sub.id },
         data: {
           cancelAtPeriodEnd: true,
@@ -348,6 +423,19 @@ export class SubscriptionService {
         },
         include: { plan: true },
       });
+
+      await this.auditLogService.logAction(
+        {
+          action: 'SUBSCRIPTION_CANCEL_SCHEDULED',
+          entity: 'Subscription',
+          entityId: updated.id,
+          organizationId,
+          newData: { cancelAtPeriodEnd: true, reason: dto.reason },
+        },
+        tx,
+      );
+
+      return updated;
     });
   }
 
@@ -363,7 +451,7 @@ export class SubscriptionService {
         throw new BadRequestException('Subscription is not scheduled for cancellation');
       }
 
-      return tx.subscription.update({
+      const updated = await tx.subscription.update({
         where: { id: sub.id },
         data: {
           cancelAtPeriodEnd: false,
@@ -371,6 +459,19 @@ export class SubscriptionService {
         },
         include: { plan: true },
       });
+
+      await this.auditLogService.logAction(
+        {
+          action: 'SUBSCRIPTION_REACTIVATED',
+          entity: 'Subscription',
+          entityId: updated.id,
+          organizationId,
+          newData: { cancelAtPeriodEnd: false },
+        },
+        tx,
+      );
+
+      return updated;
     });
   }
 
@@ -382,5 +483,164 @@ export class SubscriptionService {
       where: { organizationId },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  /**
+   * Background Job: Process subscription lifecycle, trial expiry, period-end cancellations, and grace period transitions
+   */
+  async processSubscriptionLifecycle(batchSize = 50): Promise<{
+    expiredTrials: number;
+    cancelledSubs: number;
+    pastDueSubs: number;
+  }> {
+    const now = new Date();
+    let expiredTrials = 0;
+    let cancelledSubs = 0;
+    let pastDueSubs = 0;
+
+    const freePlan = await this.prisma.plan.findUnique({
+      where: { code: 'FREE' },
+    });
+
+    if (!freePlan) {
+      this.logger.error('Cannot process subscription lifecycle: canonical FREE plan missing');
+      return { expiredTrials, cancelledSubs, pastDueSubs };
+    }
+
+    // 1. Process Expired Trials (TRIAL status where trialEndsAt <= now)
+    const expiredTrialList = await this.prisma.subscription.findMany({
+      where: {
+        status: SubscriptionStatus.TRIAL,
+        trialEndsAt: { lte: now },
+      },
+      take: batchSize,
+    });
+
+    for (const sub of expiredTrialList) {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`
+          SELECT id FROM "Organization" WHERE id = ${sub.organizationId} FOR UPDATE
+        `;
+
+        const periodEnd = this.calculatePeriodEnd(now, 'MONTHLY');
+        await tx.subscription.update({
+          where: { id: sub.id },
+          data: {
+            planId: freePlan.id,
+            status: SubscriptionStatus.ACTIVE,
+            billingCycle: 'MONTHLY',
+            currentPeriodStart: now,
+            currentPeriodEnd: periodEnd,
+            trialEndsAt: null,
+          },
+        });
+
+        await this.auditLogService.logAction(
+          {
+            action: 'SUBSCRIPTION_TRIAL_EXPIRED',
+            entity: 'Subscription',
+            entityId: sub.id,
+            organizationId: sub.organizationId,
+            newData: { plan: 'FREE', status: 'ACTIVE' },
+          },
+          tx,
+        );
+
+        expiredTrials++;
+      });
+    }
+
+    // 2. Process Period-End Cancellations (cancelAtPeriodEnd = true where currentPeriodEnd <= now)
+    const scheduledCancellations = await this.prisma.subscription.findMany({
+      where: {
+        cancelAtPeriodEnd: true,
+        currentPeriodEnd: { lte: now },
+        planId: { not: freePlan.id },
+      },
+      take: batchSize,
+    });
+
+    for (const sub of scheduledCancellations) {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`
+          SELECT id FROM "Organization" WHERE id = ${sub.organizationId} FOR UPDATE
+        `;
+
+        const periodEnd = this.calculatePeriodEnd(now, 'MONTHLY');
+        await tx.subscription.update({
+          where: { id: sub.id },
+          data: {
+            planId: freePlan.id,
+            status: SubscriptionStatus.ACTIVE,
+            billingCycle: 'MONTHLY',
+            currentPeriodStart: now,
+            currentPeriodEnd: periodEnd,
+            cancelAtPeriodEnd: false,
+            cancelledAt: now,
+            pendingPlanId: null,
+          },
+        });
+
+        await this.auditLogService.logAction(
+          {
+            action: 'SUBSCRIPTION_PERIOD_END_CANCELLED',
+            entity: 'Subscription',
+            entityId: sub.id,
+            organizationId: sub.organizationId,
+            newData: { plan: 'FREE', cancelledAt: now },
+          },
+          tx,
+        );
+
+        cancelledSubs++;
+      });
+    }
+
+    // 3. Process Paid Subscriptions that ended past grace period -> PAST_DUE
+    const expiredPaidSubs = await this.prisma.subscription.findMany({
+      where: {
+        status: SubscriptionStatus.ACTIVE,
+        planId: { not: freePlan.id },
+        currentPeriodEnd: { lte: now },
+        cancelAtPeriodEnd: false,
+      },
+      take: batchSize,
+    });
+
+    for (const sub of expiredPaidSubs) {
+      const graceEnd = sub.gracePeriodEndsAt ||
+        new Date(sub.currentPeriodEnd.getTime() + 3 * 24 * 60 * 60 * 1000);
+
+      if (now > graceEnd) {
+        await this.prisma.$transaction(async (tx) => {
+          await tx.$queryRaw`
+            SELECT id FROM "Organization" WHERE id = ${sub.organizationId} FOR UPDATE
+          `;
+
+          await tx.subscription.update({
+            where: { id: sub.id },
+            data: {
+              status: SubscriptionStatus.PAST_DUE,
+              gracePeriodEndsAt: graceEnd,
+            },
+          });
+
+          await this.auditLogService.logAction(
+            {
+              action: 'SUBSCRIPTION_GRACE_PERIOD_EXPIRED',
+              entity: 'Subscription',
+              entityId: sub.id,
+              organizationId: sub.organizationId,
+              newData: { status: 'PAST_DUE' },
+            },
+            tx,
+          );
+
+          pastDueSubs++;
+        });
+      }
+    }
+
+    return { expiredTrials, cancelledSubs, pastDueSubs };
   }
 }

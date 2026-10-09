@@ -5,12 +5,15 @@ import { UpdateOrganizationDto } from './dto/update-organization.dto.js';
 import { MemberStatus, OrganizationStatus } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { LedgerService } from '../ledger/ledger.service.js';
+import { SubscriptionLimitService } from '../subscription/services/subscription-limit.service.js';
+import { QuotaResourceType } from '../subscription/interfaces/plan-limits.interface.js';
 
 @Injectable()
 export class OrganizationService {
   constructor(
     private readonly prisma: DatabaseService,
     private readonly ledgerService: LedgerService,
+    private readonly subscriptionLimitService: SubscriptionLimitService,
   ) {}
 
   private generateSlug(name: string): string {
@@ -221,6 +224,64 @@ export class OrganizationService {
         role: true,
         user: { select: { id: true, name: true, email: true } },
       },
+    });
+  }
+
+  async addMember(organizationId: string, userId: string, roleId: string) {
+    return this.prisma.$transaction(async (tx: any) => {
+      // 1. Enforce SaaS Staff limit under Level-1 Organization row lock
+      await this.subscriptionLimitService.enforceQuota(
+        organizationId,
+        QuotaResourceType.STAFF,
+        tx,
+      );
+
+      // 2. Check if user already exists in organization
+      const existing = await tx.organizationMember.findUnique({
+        where: {
+          organizationId_userId: {
+            organizationId,
+            userId,
+          },
+        },
+      });
+
+      if (existing) {
+        if (existing.status === MemberStatus.ACTIVE) {
+          throw new ConflictException('User is already an active member of this organization');
+        }
+        // Reactivate inactive member
+        return tx.organizationMember.update({
+          where: { id: existing.id },
+          data: { status: MemberStatus.ACTIVE, roleId },
+          include: { role: true, user: { select: { id: true, name: true, email: true } } },
+        });
+      }
+
+      // 3. Verify target role exists
+      const role = await tx.role.findFirst({
+        where: {
+          id: roleId,
+          OR: [{ organizationId: null }, { organizationId }],
+        },
+      });
+
+      if (!role) {
+        throw new BadRequestException('Invalid role specified');
+      }
+
+      return tx.organizationMember.create({
+        data: {
+          organizationId,
+          userId,
+          roleId,
+          status: MemberStatus.ACTIVE,
+        },
+        include: {
+          role: true,
+          user: { select: { id: true, name: true, email: true } },
+        },
+      });
     });
   }
 }

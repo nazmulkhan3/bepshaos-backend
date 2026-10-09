@@ -58,6 +58,14 @@ export class EnvironmentVariables {
 
   @IsString()
   OTP_HASH_SECRET: string;
+
+  @IsString()
+  @IsOptional()
+  PLATFORM_ADMIN_EMAILS?: string;
+
+  @IsString()
+  @IsOptional()
+  PLATFORM_ADMIN_USER_IDS?: string;
 }
 
 export function validate(config: Record<string, unknown>) {

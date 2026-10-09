@@ -54,19 +54,43 @@ export class SubscriptionWebhookService {
     }
 
     if (!eventRecord) {
-      eventRecord = await this.prisma.subscriptionWebhookEvent.create({
-        data: {
-          provider: providerName.toUpperCase(),
-          providerEventId,
-          providerTxnId,
-          eventType,
-          organizationId: verification.organizationId || null,
-          subscriptionId: verification.subscriptionId || null,
-          billingRecordId: verification.billingRecordId || null,
-          payload: rawPayload,
-          status: WebhookEventStatus.PENDING,
-        },
-      });
+      try {
+        eventRecord = await this.prisma.subscriptionWebhookEvent.create({
+          data: {
+            provider: providerName.toUpperCase(),
+            providerEventId,
+            providerTxnId,
+            eventType,
+            organizationId: verification.organizationId || null,
+            subscriptionId: verification.subscriptionId || null,
+            billingRecordId: verification.billingRecordId || null,
+            payload: rawPayload,
+            status: WebhookEventStatus.PENDING,
+          },
+        });
+      } catch (err: any) {
+        if (err.code === 'P2002') {
+          // Concurrent duplicate insertion collided on unique(provider, providerEventId)
+          eventRecord = await this.prisma.subscriptionWebhookEvent.findUnique({
+            where: {
+              provider_providerEventId: {
+                provider: providerName.toUpperCase(),
+                providerEventId,
+              },
+            },
+          });
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    if (!eventRecord) {
+      return { success: false, message: 'Could not record or find webhook event' };
+    }
+
+    if (eventRecord.status === WebhookEventStatus.PROCESSED) {
+      return { success: true, message: 'Event already processed', eventId: eventRecord.id };
     }
 
     // 2. Process event atomically with durable lease
@@ -228,5 +252,56 @@ export class SubscriptionWebhookService {
       });
       throw err;
     }
+  }
+
+  /**
+   * Background Recovery: Scan for expired leases and failed webhook events eligible for bounded retry
+   */
+  async recoverExpiredLeasesAndRetries(maxRetries = 5, limit = 20): Promise<number> {
+    const now = new Date();
+
+    // 1. Recover events stuck in PROCESSING past lease expiration
+    const stuckEvents = await this.prisma.subscriptionWebhookEvent.findMany({
+      where: {
+        status: WebhookEventStatus.PROCESSING,
+        leaseExpiresAt: { lt: now },
+      },
+      take: limit,
+    });
+
+    for (const event of stuckEvents) {
+      await this.prisma.subscriptionWebhookEvent.update({
+        where: { id: event.id },
+        data: {
+          status: WebhookEventStatus.PENDING,
+          lockedBy: null,
+          lockedAt: null,
+          leaseExpiresAt: null,
+          error: 'Lease expired; recovered to PENDING for retry',
+        },
+      });
+    }
+
+    // 2. Query retryable events (PENDING or FAILED under maxRetries)
+    const retryableEvents = await this.prisma.subscriptionWebhookEvent.findMany({
+      where: {
+        status: { in: [WebhookEventStatus.PENDING, WebhookEventStatus.FAILED] },
+        retryCount: { lt: maxRetries },
+      },
+      take: limit,
+      orderBy: { updatedAt: 'asc' },
+    });
+
+    let processedCount = 0;
+    for (const event of retryableEvents) {
+      try {
+        await this.processEvent(event.id);
+        processedCount++;
+      } catch (err: any) {
+        this.logger.warn(`Failed recovery retry for webhook event ${event.id}: ${err.message}`);
+      }
+    }
+
+    return processedCount;
   }
 }

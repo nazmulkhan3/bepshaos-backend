@@ -38,4 +38,8 @@ export default () => ({
       password: process.env.SMTP_PASSWORD,
     },
   },
+  platformAdmin: {
+    emails: process.env.PLATFORM_ADMIN_EMAILS || '',
+    userIds: process.env.PLATFORM_ADMIN_USER_IDS || '',
+  },
 });

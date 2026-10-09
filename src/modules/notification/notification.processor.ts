@@ -23,20 +23,58 @@ export class NotificationProcessor extends WorkerHost {
   }
 
   async process(job: Job<NotificationJobData, any, string>): Promise<any> {
-    this.logger.log(`Processing notification job ${job.id}`);
+    this.logger.log(`Processing notification job ${job.id} (attempt ${job.attemptsMade + 1})`);
     const { userId, organizationId, type, title, message, entityType, entityId } = job.data;
 
     try {
-      // Create notification in DB
+      // 1. Tenant Isolation Verification: If organizationId is specified, verify user belongs to organization
+      if (organizationId) {
+        const member = await this.prisma.organizationMember.findUnique({
+          where: {
+            organizationId_userId: {
+              organizationId,
+              userId,
+            },
+          },
+        });
+
+        if (!member) {
+          this.logger.warn(
+            `Tenant boundary violation in notification job ${job.id}: user ${userId} is not in org ${organizationId}. Skipping.`,
+          );
+          return { skipped: true, reason: 'TENANT_MEMBERSHIP_NOT_FOUND' };
+        }
+      }
+
+      // 2. Idempotency Check: Prevent duplicate unread notifications for same entity and user
+      if (entityType && entityId) {
+        const existing = await this.prisma.notification.findFirst({
+          where: {
+            userId,
+            organizationId: organizationId || null,
+            type,
+            entityType,
+            entityId,
+            isRead: false,
+          },
+        });
+
+        if (existing) {
+          this.logger.log(`Notification already exists for entity ${entityType}:${entityId}. Skipping duplicate.`);
+          return existing;
+        }
+      }
+
+      // 3. Create notification in DB
       const notification = await this.prisma.notification.create({
         data: {
           userId,
-          organizationId,
+          organizationId: organizationId || null,
           type,
           title,
           message,
-          entityType,
-          entityId,
+          entityType: entityType || null,
+          entityId: entityId || null,
         },
       });
 
@@ -44,7 +82,7 @@ export class NotificationProcessor extends WorkerHost {
       return notification;
     } catch (err: unknown) {
       const error = err as Error;
-      this.logger.error(`Failed to create notification: ${error.message}`, error.stack);
+      this.logger.error(`Notification job ${job.id} failed: ${error.message}`, error.stack);
       throw error;
     }
   }
