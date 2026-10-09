@@ -7,12 +7,18 @@ import { PageDto, PageMetaDto } from '../../common/dtos/pagination.dto.js';
 import { Prisma } from '@prisma/client';
 import { customAlphabet } from 'nanoid';
 
+import { SubscriptionLimitService } from '../subscription/services/subscription-limit.service.js';
+import { QuotaResourceType } from '../subscription/interfaces/plan-limits.interface.js';
+
 const nanoid = customAlphabet('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', 8);
 const barcodeNanoid = customAlphabet('0123456789', 12);
 
 @Injectable()
 export class ProductService {
-  constructor(private prisma: DatabaseService) {}
+  constructor(
+    private prisma: DatabaseService,
+    private readonly subscriptionLimitService: SubscriptionLimitService,
+  ) {}
 
   private generateSKU(): string {
     return `SKU-${nanoid()}`;
@@ -39,6 +45,13 @@ export class ProductService {
         const barcode = data.barcode || this.generateBarcode();
 
         const product = await this.prisma.$transaction(async (tx) => {
+          // Enforce SaaS Product limit under Level-1 Organization row lock
+          await this.subscriptionLimitService.enforceQuota(
+            organizationId,
+            QuotaResourceType.PRODUCT,
+            tx,
+          );
+
           const newProduct = await tx.product.create({
             data: {
               organizationId,

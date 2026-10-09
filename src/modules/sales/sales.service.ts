@@ -18,14 +18,19 @@ import {
 } from '@prisma/client';
 import crypto from 'crypto';
 import { LedgerService } from '../ledger/ledger.service.js';
-
+import { SubscriptionLimitService } from '../subscription/services/subscription-limit.service.js';
+import { QuotaResourceType } from '../subscription/interfaces/plan-limits.interface.js';
 
 @Injectable()
 export class SalesService {
   private readonly logger = new Logger(SalesService.name);
 
-  constructor(private readonly prisma: DatabaseService,
-    private readonly ledgerService: LedgerService,private readonly notificationQueue: NotificationQueueService) {}
+  constructor(
+    private readonly prisma: DatabaseService,
+    private readonly ledgerService: LedgerService,
+    private readonly notificationQueue: NotificationQueueService,
+    private readonly subscriptionLimitService: SubscriptionLimitService,
+  ) {}
 
   /**
    * Helper to generate a deterministic hash of the creation payload
@@ -331,6 +336,15 @@ export class SalesService {
               throw new BadRequestException('Total sale amount cannot be negative');
             }
 
+            // Enforce SaaS Transaction Quota under Level-1 Organization row lock
+            await this.subscriptionLimitService.enforceQuota(
+              organizationId,
+              QuotaResourceType.TRANSACTION,
+              tx,
+            );
+
+            const now = new Date();
+
             // Create Sale and SaleItems
             const sale = await tx.sale.create({
               data: {
@@ -340,6 +354,7 @@ export class SalesService {
                 saleNumber,
                 invoiceNumber: saleNumber,
                 status: SaleStatus.COMPLETED,
+                completedAt: now,
                 subtotal: calculatedSubtotal,
                 discountAmount: totalDiscount,
                 taxAmount: totalTax,

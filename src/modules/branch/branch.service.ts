@@ -5,53 +5,57 @@ import { CreateBranchDto } from './dto/create-branch.dto.js';
 import { UpdateBranchDto } from './dto/update-branch.dto.js';
 import { PageOptionsDto, PageMetaDto, PageDto } from '../../common/dtos/pagination.dto.js';
 import { BranchStatus } from '@prisma/client';
+import { SubscriptionLimitService } from '../subscription/services/subscription-limit.service.js';
+import { QuotaResourceType } from '../subscription/interfaces/plan-limits.interface.js';
 
 @Injectable()
 export class BranchService {
-  constructor(private prisma: DatabaseService) {}
+  constructor(
+    private prisma: DatabaseService,
+    private readonly subscriptionLimitService: SubscriptionLimitService,
+  ) {}
 
   async create(organizationId: string, createBranchDto: CreateBranchDto) {
-    const existing = await this.prisma.branch.findUnique({
-      where: {
-        organizationId_code: {
-          organizationId,
-          code: createBranchDto.code,
+    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      // 1. Enforce SaaS Branch limit under Level-1 Organization row lock
+      await this.subscriptionLimitService.enforceQuota(
+        organizationId,
+        QuotaResourceType.BRANCH,
+        tx,
+      );
+
+      const existing = await tx.branch.findUnique({
+        where: {
+          organizationId_code: {
+            organizationId,
+            code: createBranchDto.code,
+          },
         },
-      },
-    });
+      });
 
-    if (existing) {
-      throw new ConflictException(`Branch code ${createBranchDto.code} already exists in this organization`);
-    }
+      if (existing) {
+        throw new ConflictException(`Branch code ${createBranchDto.code} already exists in this organization`);
+      }
 
-    // Check if it's the first branch, if so make it default
-    const count = await this.prisma.branch.count({ where: { organizationId } });
-    if (count === 0) {
-      createBranchDto.isDefault = true;
-    }
+      // Check if it's the first branch, if so make it default
+      const count = await tx.branch.count({ where: { organizationId } });
+      if (count === 0) {
+        createBranchDto.isDefault = true;
+      }
 
-    if (createBranchDto.isDefault) {
-      // Use transaction to safely change default
-      return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      if (createBranchDto.isDefault) {
         await tx.branch.updateMany({
           where: { organizationId, isDefault: true },
           data: { isDefault: false },
         });
+      }
 
-        return tx.branch.create({
-          data: {
-            organizationId,
-            ...createBranchDto,
-          },
-        });
+      return tx.branch.create({
+        data: {
+          organizationId,
+          ...createBranchDto,
+        },
       });
-    }
-
-    return this.prisma.branch.create({
-      data: {
-        organizationId,
-        ...createBranchDto,
-      },
     });
   }
 

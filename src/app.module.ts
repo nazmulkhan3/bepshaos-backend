@@ -34,6 +34,7 @@ import { InvoiceModule } from './modules/invoice/invoice.module.js';
 import { ReceiptModule } from './modules/receipt/receipt.module.js';
 import { ReportModule } from './modules/report/report.module.js';
 import { NotificationModule } from './modules/notification/notification.module.js';
+import { SubscriptionModule } from './modules/subscription/subscription.module.js';
 
 @Module({
   imports: [
@@ -76,6 +77,7 @@ import { NotificationModule } from './modules/notification/notification.module.j
     ReceiptModule,
     ReportModule,
     NotificationModule,
+    SubscriptionModule,
   ],
   controllers: [AppController],
   providers: [

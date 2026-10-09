@@ -1,34 +1,130 @@
 model Plan {
-  id              String  @id @default(uuid())
-  name            String  @unique
-  maxBranches     Int     @default(1)
-  maxStaff        Int     @default(1)
-  maxProducts     Int     @default(100)
-  maxTransactions Int     @default(1000)
-  features        Json?
-  price           Decimal @default(0) @db.Decimal(19, 4)
+  id              String   @id @default(uuid())
+  code            String   @unique
+  name            String   @unique
+  description     String?
+  isActive        Boolean  @default(true)
+  isPublic        Boolean  @default(true)
+  sortOrder       Int      @default(0)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  currency        String   @default("BDT")
+  price           Decimal  @default(0) @db.Decimal(19, 4) // Deprecated legacy field preserved
+  priceMonthly    Decimal  @default(0) @db.Decimal(19, 4)
+  priceYearly     Decimal  @default(0) @db.Decimal(19, 4)
 
-  subscriptions Subscription[]
+  maxBranches     Int?     @default(1)
+  maxStaff        Int?     @default(2)
+  maxProducts     Int?     @default(100)
+  maxTransactions Int?     @default(500)
+
+  features        Json     @default("{}")
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  subscriptions   Subscription[]
+
+  @@index([isActive, isPublic])
 }
 
 model Subscription {
-  id             String             @id @default(uuid())
-  organizationId String
-  planId         String
-  status         SubscriptionStatus @default(ACTIVE)
-  startDate      DateTime
-  endDate        DateTime?
-  trialEndsAt    DateTime?
-  billingCycle   String             @default("MONTHLY")
+  id                     String             @id @default(uuid())
+  organizationId         String
+  planId                 String
+  status                 SubscriptionStatus @default(ACTIVE)
+  billingCycle           String             @default("MONTHLY")
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  startDate              DateTime           @default(now())
+  currentPeriodStart     DateTime           @default(now())
+  currentPeriodEnd       DateTime
+  endDate                DateTime?          // Preserved legacy field
+  trialEndsAt            DateTime?
+  gracePeriodEndsAt      DateTime?
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  plan         Plan         @relation(fields: [planId], references: [id], onDelete: Restrict)
+  cancelAtPeriodEnd      Boolean            @default(false)
+  cancelledAt            DateTime?
+  cancellationReason     String?
+  pendingPlanId          String?
+
+  provider               String?            // 'INTERNAL_SYSTEM', 'BKASH', 'STRIPE', etc.
+  providerSubscriptionId String?
+
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  organization           Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  plan                   Plan               @relation(fields: [planId], references: [id], onDelete: Restrict)
+  billingRecords         SubscriptionBillingRecord[]
+
+  @@index([organizationId, status])
+  @@index([status, currentPeriodEnd])
+}
+
+model SubscriptionBillingRecord {
+  id                 String              @id @default(uuid())
+  organizationId     String
+  subscriptionId     String?
+  invoiceNumber      String              @unique
+
+  planCode           String
+  planName           String
+  amount             Decimal             @db.Decimal(19, 4)
+  currency           String              @default("BDT")
+  billingCycle       String
+
+  periodStart        DateTime
+  periodEnd          DateTime
+  status             BillingRecordStatus @default(PENDING)
+  paidAt             DateTime?
+
+  provider           String?
+  transactionId      String?
+  idempotencyKey     String?             @unique
+  rawProviderPayload Json?
+
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  subscription       Subscription?       @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+  @@index([status])
+}
+
+model SubscriptionWebhookEvent {
+  id                 String              @id @default(uuid())
+  provider           String
+  providerEventId    String
+  providerTxnId      String?
+  eventType          String
+
+  organizationId     String?
+  subscriptionId     String?
+  billingRecordId    String?
+
+  payload            Json
+  status             WebhookEventStatus  @default(PENDING)
+  error              String?
+  eventTimestamp     DateTime?
+
+  lockedBy           String?
+  lockedAt           DateTime?
+  leaseExpiresAt     DateTime?
+  retryCount         Int                 @default(0)
+
+  receivedAt         DateTime            @default(now())
+  processedAt        DateTime?
+
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  organization       Organization?       @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  @@unique([provider, providerEventId])
+  @@index([status, leaseExpiresAt])
+  @@index([providerTxnId])
+  @@index([subscriptionId])
 }
 
 model Notification {

@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { SalesService } from './sales.service.js';
 import { DatabaseService } from '../../database/database.service.js';
 import { LedgerService } from '../ledger/ledger.service.js';
+import { SubscriptionLimitService } from '../subscription/services/subscription-limit.service.js';
 import {
   BadRequestException,
   ConflictException,
@@ -74,6 +75,12 @@ describe('SalesService', () => {
         {
           provide: NotificationQueueService,
           useValue: { enqueue: vi.fn() },
+        },
+        {
+          provide: SubscriptionLimitService,
+          useValue: {
+            enforceQuota: vi.fn().mockResolvedValue(undefined),
+          },
         },
         ],
     }).compile();

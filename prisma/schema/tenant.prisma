@@ -22,6 +22,7 @@ model Organization {
   payments           Payment[]
   expenses           Expense[]
   expenseCategories  ExpenseCategory[]
+  hasUsedTrial       Boolean                     @default(false)
   accounts           Account[]
   journalEntries     JournalEntry[]
   subscriptions      Subscription[]
@@ -29,6 +30,8 @@ model Organization {
   auditLogs          AuditLog[]
   invoices           Invoice[]
   receipts           Receipt[]
+  subscriptionBillingRecords SubscriptionBillingRecord[]
+  subscriptionWebhookEvents  SubscriptionWebhookEvent[]
 }
 
 model OrganizationMember {

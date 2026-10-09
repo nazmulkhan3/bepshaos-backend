@@ -90,6 +90,9 @@ const permissions = [
   { action: 'branch:create', description: 'Create branches' },
   { action: 'branch:update', description: 'Update branches' },
   { action: 'branch:archive', description: 'Archive branches' },
+
+  { action: 'subscription:read', description: 'Read subscription plan and usage' },
+  { action: 'subscription:update', description: 'Manage subscription plan and billing' },
 ];
 
 const systemRoles = {

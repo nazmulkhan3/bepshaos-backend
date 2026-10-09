@@ -88,6 +88,22 @@ enum SubscriptionStatus {
   EXPIRED
   CANCELLED
   PAST_DUE
+  SUSPENDED
+}
+
+enum BillingRecordStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum WebhookEventStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  FAILED
+  IGNORED
 }
 
 enum InventoryMovementType {

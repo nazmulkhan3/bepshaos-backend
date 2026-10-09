@@ -17,6 +17,7 @@ model Sale {
   createdBy      String?
   cancelledAt    DateTime?
   cancelledBy    String?
+  completedAt    DateTime?
 
   // Offline Sync fields
   clientId        String?  @unique
@@ -41,6 +42,7 @@ model Sale {
   @@index([organizationId, customerId])
   @@index([organizationId, status])
   @@index([organizationId, createdAt])
+  @@index([organizationId, status, completedAt])
 }
 
 model SaleItem {

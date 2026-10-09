@@ -66,6 +66,29 @@ export class OrganizationService {
         // 4. Provision system chart-of-accounts (Phase 15)
         await this.ledgerService.provisionSystemAccounts(organization.id, tx);
 
+        // 5. Provision canonical Free SaaS Subscription (Phase 20)
+        const freePlan = await tx.plan.findUnique({
+          where: { code: 'FREE' },
+        });
+
+        if (freePlan) {
+          const now = new Date();
+          const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
+          const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0, 0));
+
+          await tx.subscription.create({
+            data: {
+              organizationId: organization.id,
+              planId: freePlan.id,
+              status: 'ACTIVE',
+              billingCycle: 'MONTHLY',
+              currentPeriodStart: start,
+              currentPeriodEnd: end,
+              provider: 'INTERNAL_SYSTEM',
+            },
+          });
+        }
+
         return organization;
       });
     } catch (error: any) {

@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ProductService } from './product.service.js';
 import { DatabaseService } from '../../database/database.service.js';
+import { SubscriptionLimitService } from '../subscription/services/subscription-limit.service.js';
 import { vi } from 'vitest';
 
 describe('ProductService', () => {
@@ -14,7 +15,10 @@ describe('ProductService', () => {
         {
           provide: DatabaseService,
           useValue: {
-            $transaction: vi.fn(),
+            $transaction: vi.fn((cb) => cb({
+              product: { create: vi.fn() },
+              auditLog: { create: vi.fn() },
+            })),
             product: {
               create: vi.fn(),
               findMany: vi.fn(),
@@ -23,9 +27,18 @@ describe('ProductService', () => {
               update: vi.fn(),
               count: vi.fn(),
             },
+            category: {
+              findFirst: vi.fn(),
+            },
             auditLog: {
               create: vi.fn(),
             },
+          },
+        },
+        {
+          provide: SubscriptionLimitService,
+          useValue: {
+            enforceQuota: vi.fn().mockResolvedValue(undefined),
           },
         },
       ],
