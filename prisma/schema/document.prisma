@@ -1,0 +1,50 @@
+model Invoice {
+  id             String        @id @default(uuid())
+  organizationId String
+  saleId         String        @unique
+  invoiceNumber  String
+  issueDate      DateTime      @default(now())
+  dueDate        DateTime?
+  status         InvoiceStatus @default(ISSUED)
+  note           String?
+  terms          String?
+  idempotencyKey String?
+  createdBy      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sale         Sale         @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  creator      User?        @relation("InvoiceCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, invoiceNumber])
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId])
+  @@index([organizationId, saleId])
+  @@index([organizationId, status])
+}
+
+model Receipt {
+  id             String        @id @default(uuid())
+  organizationId String
+  paymentId      String        @unique
+  receiptNumber  String
+  issueDate      DateTime      @default(now())
+  status         ReceiptStatus @default(ISSUED)
+  note           String?
+  idempotencyKey String?
+  createdBy      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  payment      Payment      @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  creator      User?        @relation("ReceiptCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, receiptNumber])
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId])
+  @@index([organizationId, paymentId])
+}

@@ -146,3 +146,18 @@ enum JournalSourceType {
   EXPENSE
   MANUAL
 }
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  SENT
+  VIEWED
+  PAID
+  VOIDED
+}
+
+enum ReceiptStatus {
+  ISSUED
+  SENT
+  VOIDED
+}

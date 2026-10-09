@@ -44,7 +44,7 @@ describe('Roles & Permissions (e2e)', () => {
 
   describe('Setup organization and users', () => {
     it('should setup test environment', async () => {
-      const testId = nanoid(5);
+      const testId = Date.now().toString() + nanoid(5);
       const owner = await prisma.user.create({ data: { name: 'Owner', email: `owner_${testId}@roles.com`, password: 'hash' } });
       const staff = await prisma.user.create({ data: { name: 'Staff', email: `staff_${testId}@roles.com`, password: 'hash' } });
       ownerUserId = owner.id;

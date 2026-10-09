@@ -76,7 +76,7 @@ describe('PurchasesModule (e2e)', () => {
   });
 
   it('should register users, organizations, branches, suppliers, products and stock for setup', async () => {
-    const testId = nanoid(5);
+    const testId = Date.now().toString() + nanoid(5);
 
     // 1. Create Owner User A
     const userA = await db.user.create({

@@ -42,7 +42,7 @@ describe('CategoryModule (e2e)', () => {
 
   describe('Setup Users and Organizations', () => {
     it('should register users and orgs', async () => {
-      const testId = nanoid(5);
+      const testId = Date.now().toString() + nanoid(5);
       const user1 = await prisma.user.create({
         data: { email: `catuser1_${testId}@example.com`, name: 'Cat User One', password: 'pw' },
       });

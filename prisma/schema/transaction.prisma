@@ -25,13 +25,14 @@ model Sale {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  branch       Branch       @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  customer     Customer?    @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  creator      User?        @relation("SaleCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
-  canceller    User?        @relation("SaleCancelledBy", fields: [cancelledBy], references: [id], onDelete: SetNull)
-  items        SaleItem[]
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch             Branch              @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  customer           Customer?           @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  creator            User?               @relation("SaleCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  canceller          User?               @relation("SaleCancelledBy", fields: [cancelledBy], references: [id], onDelete: SetNull)
+  items              SaleItem[]
   paymentAllocations PaymentAllocation[]
+  invoice            Invoice?
 
   @@unique([organizationId, saleNumber])
   @@unique([organizationId, idempotencyKey])
@@ -86,12 +87,12 @@ model Purchase {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  branch       Branch         @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  supplier     Supplier?      @relation(fields: [supplierId], references: [id], onDelete: Restrict)
-  creator      User?          @relation("PurchaseCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
-  canceller    User?          @relation("PurchaseCancelledBy", fields: [cancelledBy], references: [id], onDelete: SetNull)
-  items        PurchaseItem[]
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch             Branch              @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  supplier           Supplier?           @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  creator            User?               @relation("PurchaseCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  canceller          User?               @relation("PurchaseCancelledBy", fields: [cancelledBy], references: [id], onDelete: SetNull)
+  items              PurchaseItem[]
   paymentAllocations PaymentAllocation[]
 
   @@unique([organizationId, purchaseNumber])
@@ -152,6 +153,7 @@ model Payment {
   creator      User?               @relation("PaymentCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
   voider       User?               @relation("PaymentVoidedBy", fields: [voidedBy], references: [id], onDelete: SetNull)
   allocations  PaymentAllocation[]
+  receipt      Receipt?
 
   @@unique([organizationId, paymentNumber])
   @@unique([organizationId, idempotencyKey])
@@ -184,14 +186,14 @@ model PaymentAllocation {
 }
 
 model ExpenseCategory {
-  id               String   @id @default(uuid())
+  id               String  @id @default(uuid())
   organizationId   String
   name             String
   code             String
   description      String?
   expenseAccountId String
-  isSystem         Boolean  @default(false)
-  isActive         Boolean  @default(true)
+  isSystem         Boolean @default(false)
+  isActive         Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -68,7 +68,7 @@ describe('LedgerModule (e2e)', () => {
   // ─── SETUP ──────────────────────────────────────────────────────────────────
 
   it('should set up test environment (users, orgs, branches, customers, suppliers, products)', async () => {
-    const testId = nanoid(5);
+    const testId = Date.now().toString() + nanoid(5);
 
     // Create owner user A directly via Prisma (avoids Redis dependency)
     const userA = await db.user.create({

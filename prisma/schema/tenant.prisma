@@ -27,6 +27,8 @@ model Organization {
   subscriptions      Subscription[]
   notifications      Notification[]
   auditLogs          AuditLog[]
+  invoices           Invoice[]
+  receipts           Receipt[]
 }
 
 model OrganizationMember {

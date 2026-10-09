@@ -37,7 +37,7 @@ describe('OrganizationModule (e2e)', () => {
 
   describe('Setup Users', () => {
     it('should register two users', async () => {
-      const testId = nanoid(5);
+      const testId = Date.now().toString() + nanoid(5);
       // Create user 1
       const user1 = await prisma.user.create({
         data: {

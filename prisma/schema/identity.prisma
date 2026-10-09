@@ -11,20 +11,22 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  sessions             Session[]
-  organizationMembers  OrganizationMember[]
-  auditLogs            AuditLog[]
-  notifications        Notification[]
-  expensesCreated      Expense[]            @relation("ExpenseCreatedBy")
-  expensesCancelled    Expense[]            @relation("ExpenseCancelledBy")
-  inventoryMovements   InventoryMovement[]
-  salesCreated         Sale[]               @relation("SaleCreatedBy")
-  salesCancelled       Sale[]               @relation("SaleCancelledBy")
-  purchasesCreated     Purchase[]           @relation("PurchaseCreatedBy")
-  purchasesCancelled   Purchase[]           @relation("PurchaseCancelledBy")
-  paymentsCreated      Payment[]            @relation("PaymentCreatedBy")
-  paymentsVoided       Payment[]            @relation("PaymentVoidedBy")
-  journalEntriesCreated JournalEntry[]      @relation("JournalCreatedBy")
+  sessions              Session[]
+  organizationMembers   OrganizationMember[]
+  auditLogs             AuditLog[]
+  notifications         Notification[]
+  expensesCreated       Expense[]            @relation("ExpenseCreatedBy")
+  expensesCancelled     Expense[]            @relation("ExpenseCancelledBy")
+  inventoryMovements    InventoryMovement[]
+  salesCreated          Sale[]               @relation("SaleCreatedBy")
+  salesCancelled        Sale[]               @relation("SaleCancelledBy")
+  purchasesCreated      Purchase[]           @relation("PurchaseCreatedBy")
+  purchasesCancelled    Purchase[]           @relation("PurchaseCancelledBy")
+  paymentsCreated       Payment[]            @relation("PaymentCreatedBy")
+  paymentsVoided        Payment[]            @relation("PaymentVoidedBy")
+  journalEntriesCreated JournalEntry[]       @relation("JournalCreatedBy")
+  invoicesCreated       Invoice[]            @relation("InvoiceCreatedBy")
+  receiptsCreated       Receipt[]            @relation("ReceiptCreatedBy")
 }
 
 model Session {

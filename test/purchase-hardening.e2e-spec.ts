@@ -73,7 +73,7 @@ describe('Purchases Phase 12 Hardening (e2e)', () => {
     const { JwtService } = await import('@nestjs/jwt');
     jwtService = app.get(JwtService);
 
-    const testId = nanoid(5);
+    const testId = Date.now().toString() + nanoid(5);
 
     const owner = await db.user.create({
       data: { email: `hard_owner_${testId}@example.com`, name: 'Hard Owner', password: 'dummy' },

@@ -41,7 +41,7 @@ describe('BranchModule (e2e)', () => {
 
   describe('Setup Users and Organizations', () => {
     it('should register users and orgs', async () => {
-      const testId = nanoid(5);
+      const testId = Date.now().toString() + nanoid(5);
       const user1 = await prisma.user.create({
         data: { email: `bruser1_${testId}@example.com`, name: 'Br User One', password: 'pw' },
       });

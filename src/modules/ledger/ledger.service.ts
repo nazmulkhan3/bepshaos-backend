@@ -443,6 +443,17 @@ export class LedgerService {
     tx: Prisma.TransactionClient,
     reason?: string,
   ) {
+    // Lock original entry to prevent concurrent reversals
+    const locked = await tx.$queryRaw<{ id: string }[]>`
+      SELECT id FROM "JournalEntry" 
+      WHERE id = ${journalEntryId} AND "organizationId" = ${organizationId}
+      FOR UPDATE
+    `;
+    
+    if (!locked || locked.length === 0) {
+      throw new NotFoundException('Journal entry not found');
+    }
+
     const original = await tx.journalEntry.findFirst({
       where: { id: journalEntryId, organizationId },
       include: { lines: true },

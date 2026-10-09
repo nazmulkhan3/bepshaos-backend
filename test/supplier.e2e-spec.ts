@@ -34,13 +34,28 @@ describe('SupplierModule (e2e)', () => {
   });
 
   afterAll(async () => {
-    await prisma.supplierAddress.deleteMany({});
-    await prisma.supplier.deleteMany({});
-    await prisma.organizationMember.deleteMany({});
-    await prisma.role.deleteMany({ where: { organizationId: { not: null } } });
-    await prisma.organization.deleteMany({});
-    await prisma.session.deleteMany({});
-    await prisma.user.deleteMany({});
+    const orgs = [org1Id, org2Id].filter(Boolean);
+    if (orgs.length > 0) {
+      await prisma.purchaseItem.deleteMany({ where: { purchase: { organizationId: { in: orgs } } } });
+      await prisma.purchase.deleteMany({ where: { organizationId: { in: orgs } } });
+      await prisma.journalEntryLine.deleteMany({ where: { journalEntry: { organizationId: { in: orgs } } } });
+      await prisma.journalEntry.deleteMany({ where: { organizationId: { in: orgs } } });
+      await prisma.supplierAddress.deleteMany({ where: { supplier: { organizationId: { in: orgs } } } });
+      await prisma.supplier.deleteMany({ where: { organizationId: { in: orgs } } });
+      await prisma.organizationMember.deleteMany({ where: { organizationId: { in: orgs } } });
+      await prisma.role.deleteMany({ where: { organizationId: { in: orgs } } });
+      await prisma.organization.deleteMany({ where: { id: { in: orgs } } });
+    }
+    const users = [user1Token, user2Token, user3Token]
+      .filter(Boolean)
+      .map(t => {
+        try { return JSON.parse(Buffer.from(t.split('.')[1], 'base64').toString()).sub; } catch(e) { return null; }
+      })
+      .filter(Boolean);
+    if (users.length > 0) {
+      await prisma.session.deleteMany({ where: { userId: { in: users as string[] } } });
+      await prisma.user.deleteMany({ where: { id: { in: users as string[] } } });
+    }
     await app.close();
   });
 

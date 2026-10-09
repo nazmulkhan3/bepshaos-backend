@@ -56,7 +56,7 @@ describe('InventoryModule (e2e)', () => {
   });
 
   it('should register user and organization for setup', async () => {
-    const testId = nanoid(5);
+    const testId = Date.now().toString() + nanoid(5);
     const email = `inventory${testId}@example.com`;
 
     // 1. Create User

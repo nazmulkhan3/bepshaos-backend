@@ -30,6 +30,8 @@ import { PurchasesModule } from './modules/purchases/purchases.module.js';
 import { PaymentsModule } from './modules/payments/payments.module.js';
 import { LedgerModule } from './modules/ledger/ledger.module.js';
 import { ExpensesModule } from './modules/expenses/expenses.module.js';
+import { InvoiceModule } from './modules/invoice/invoice.module.js';
+import { ReceiptModule } from './modules/receipt/receipt.module.js';
 
 @Module({
   imports: [
@@ -68,6 +70,8 @@ import { ExpensesModule } from './modules/expenses/expenses.module.js';
     PaymentsModule,
     LedgerModule,
     ExpensesModule,
+    InvoiceModule,
+    ReceiptModule,
   ],
   controllers: [AppController],
   providers: [

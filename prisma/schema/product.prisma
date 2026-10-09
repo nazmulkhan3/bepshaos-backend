@@ -22,12 +22,12 @@ model Customer {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime? // Soft delete
 
-  organization    Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  branch          Branch?            @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  sales           Sale[]
-  journalLines    JournalEntryLine[]
-  addresses       CustomerAddress[]
-  payments        Payment[]
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch       Branch?            @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  sales        Sale[]
+  journalLines JournalEntryLine[]
+  addresses    CustomerAddress[]
+  payments     Payment[]
 
   @@unique([organizationId, customerCode])
   @@index([organizationId, phone])
@@ -75,12 +75,12 @@ model Supplier {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime? // Soft delete
 
-  organization    Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  branch          Branch?            @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  purchases       Purchase[]
-  journalLines    JournalEntryLine[]
-  addresses       SupplierAddress[]
-  payments        Payment[]
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch       Branch?            @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  purchases    Purchase[]
+  journalLines JournalEntryLine[]
+  addresses    SupplierAddress[]
+  payments     Payment[]
 
   @@unique([organizationId, supplierCode])
   @@index([organizationId, phone])
