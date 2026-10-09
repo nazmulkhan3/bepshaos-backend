@@ -122,7 +122,7 @@ export class PurchasesService {
 
     while (retries < maxRetries) {
       try {
-        return await this.prisma.$transaction(
+        const purchase = await this.prisma.$transaction(
           async (tx) => {
             if (dto.idempotencyKey) {
               const concurrentPurchase = await tx.purchase.findUnique({

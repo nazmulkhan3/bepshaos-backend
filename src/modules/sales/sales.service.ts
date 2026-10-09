@@ -132,7 +132,7 @@ export class SalesService {
 
     while (retries < maxRetries) {
       try {
-        return await this.prisma.$transaction(
+        const sale = await this.prisma.$transaction(
           async (tx) => {
             // Concurrent idempotency check inside transaction
             if (dto.idempotencyKey) {

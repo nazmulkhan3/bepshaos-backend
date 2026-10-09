@@ -1,9 +1,11 @@
-import { Test, TestingModule } from '@nestjs/common';
-import { INestApplication } from '@nestjs/common';
+import { Test, TestingModule } from '@nestjs/testing';
+import { INestApplication, ValidationPipe, VersioningType } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../src/app.module.js';
-import { DatabaseService } from '../src/database/prisma.service.js';
+import { DatabaseService } from '../src/database/database.service.js';
 import { JwtService } from '@nestjs/jwt';
+
+import { NotificationQueueService } from '../src/modules/notification/notification.queue.service.js';
 
 describe('NotificationController (e2e)', () => {
   let app: INestApplication;
@@ -19,6 +21,18 @@ describe('NotificationController (e2e)', () => {
     }).compile();
 
     app = moduleFixture.createNestApplication();
+    
+    app.enableVersioning({
+      type: VersioningType.URI,
+      prefix: 'v',
+    });
+
+    app.useGlobalPipes(
+      new ValidationPipe({
+        whitelist: true,
+        transform: true,
+      }),
+    );
     await app.init();
 
     prisma = moduleFixture.get<DatabaseService>(DatabaseService);
@@ -94,7 +108,7 @@ describe('NotificationController (e2e)', () => {
         .set('Authorization', `Bearer ${authToken}`)
         .expect(200)
         .expect((res) => {
-          expect(res.body.count).toBe(1);
+          expect(res.body.data.count).toBe(1);
         });
     });
 
@@ -104,7 +118,7 @@ describe('NotificationController (e2e)', () => {
         .set('Authorization', `Bearer ${authToken}`)
         .expect(200)
         .expect((res) => {
-          expect(res.body.isRead).toBe(true);
+          expect(res.body.data.isRead).toBe(true);
         });
     });
 
@@ -114,8 +128,37 @@ describe('NotificationController (e2e)', () => {
         .set('Authorization', `Bearer ${authToken}`)
         .expect(200)
         .expect((res) => {
-          expect(res.body.count).toBe(0); // already read
+          expect(res.body.data.count).toBe(0); // already read
         });
+    });
+
+    it('should enqueue and process notification job asynchronously via BullMQ', async () => {
+      const queueService = app.get<NotificationQueueService>(NotificationQueueService);
+      const uniqueMsg = `BullMQ Async Message ${Date.now()}`;
+      await queueService.enqueue({
+        userId,
+        organizationId: orgId,
+        type: 'SYSTEM',
+        title: 'BullMQ Async Test',
+        message: uniqueMsg,
+        entityType: 'TestEntity',
+        entityId: `entity-${Date.now()}`,
+      });
+
+      let createdNotif = null;
+      for (let i = 0; i < 30; i++) {
+        await new Promise((r) => setTimeout(r, 200));
+        createdNotif = await prisma.notification.findFirst({
+          where: {
+            userId,
+            message: uniqueMsg,
+          },
+        });
+        if (createdNotif) break;
+      }
+
+      expect(createdNotif).toBeDefined();
+      expect(createdNotif?.title).toBe('BullMQ Async Test');
     });
   });
 });

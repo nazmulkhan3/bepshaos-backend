@@ -207,7 +207,7 @@ export class ExpensesService {
 
     while (retryCount < maxRetries) {
       try {
-        return await this.prisma.$transaction(async (tx) => {
+        const expense = await this.prisma.$transaction(async (tx) => {
           const expenseNumber = await this.generateExpenseNumber(organizationId, tx);
 
           const expense = await tx.expense.create({

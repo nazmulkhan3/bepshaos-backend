@@ -148,7 +148,7 @@ export class PaymentsService {
 
     while (retries < maxRetries) {
       try {
-        return await this.prisma.$transaction(
+        const payment = await this.prisma.$transaction(
           async (tx) => {
             // Idempotency check inside transaction
             if (dto.idempotencyKey) {
@@ -329,7 +329,7 @@ export class PaymentsService {
               },
               tx,
             );
-
+            return payment;
           },
           {
             isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
@@ -341,7 +341,7 @@ export class PaymentsService {
           organizationId,
           type: payment.direction === 'RECEIVED' ? 'PAYMENT_RECEIVED' : 'PAYMENT_SENT',
           title: payment.direction === 'RECEIVED' ? 'Payment Received' : 'Payment Sent',
-          message: `Payment ${payment.paymentNumber} of amount ${payment.amount} has been processed.`,
+          message: `Payment ${payment.paymentNumber} of amount ${payment.amount.toString()} has been processed.`,
           entityType: 'Payment',
           entityId: payment.id,
         });
