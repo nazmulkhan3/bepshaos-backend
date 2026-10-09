@@ -1,3 +1,4 @@
+import { NotificationQueueService } from '../notification/notification.queue.service.js';
 import { Test, TestingModule } from '@nestjs/testing';
 import { SalesService } from './sales.service.js';
 import { DatabaseService } from '../../database/database.service.js';
@@ -61,8 +62,7 @@ describe('SalesService', () => {
     };
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        SalesService,
+      providers: [SalesService,
         {
           provide: DatabaseService,
           useValue: db,
@@ -71,7 +71,11 @@ describe('SalesService', () => {
           provide: LedgerService,
           useValue: mockLedgerService,
         },
-      ],
+        {
+          provide: NotificationQueueService,
+          useValue: { enqueue: vi.fn() },
+        },
+        ],
     }).compile();
 
     service = module.get<SalesService>(SalesService);

@@ -1,3 +1,4 @@
+import { NotificationQueueService } from '../notification/notification.queue.service.js';
 import {
   Injectable,
   NotFoundException,
@@ -23,10 +24,8 @@ import { LedgerService } from '../ledger/ledger.service.js';
 export class PurchasesService {
   private readonly logger = new Logger(PurchasesService.name);
 
-  constructor(
-    private readonly prisma: DatabaseService,
-    private readonly ledgerService: LedgerService,
-  ) {}
+  constructor(private readonly prisma: DatabaseService,
+    private readonly ledgerService: LedgerService,private readonly notificationQueue: NotificationQueueService) {}
 
   private generateRequestHash(dto: CreatePurchaseDto): string {
     const normalized = {
@@ -405,6 +404,18 @@ export class PurchasesService {
             timeout: 30000,
           }
         );
+
+        await this.notificationQueue.enqueue({
+          userId,
+          organizationId,
+          type: 'PURCHASE_CREATED',
+          title: 'Purchase Created',
+          message: `Purchase ${purchase.purchaseNumber} has been successfully created.`,
+          entityType: 'Purchase',
+          entityId: purchase.id,
+        });
+
+        return purchase;
       } catch (error: any) {
         const isPurchaseNumberCollision =
           error.code === 'P2002' &&

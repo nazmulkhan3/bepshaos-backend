@@ -32,21 +32,26 @@ model Subscription {
 }
 
 model Notification {
-  id             String    @id @default(uuid())
-  organizationId String?
-  userId         String
-  type           String
+  id             String           @id @default(uuid())
+  type           NotificationType
   title          String
   message        String
-  metadata       Json?
+  userId         String
+  organizationId String?
+  entityType     String?
+  entityId       String?
+  isRead         Boolean          @default(false)
   readAt         DateTime?
 
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  @@index([userId, readAt])
+  @@index([userId, isRead])
+  @@index([organizationId, createdAt])
+  @@index([createdAt])
 }
 
 model AuditLog {

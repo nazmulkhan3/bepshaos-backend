@@ -1,3 +1,4 @@
+import { NotificationQueueService } from '../notification/notification.queue.service.js';
 import {
   Injectable,
   NotFoundException,
@@ -23,10 +24,8 @@ import { LedgerService } from '../ledger/ledger.service.js';
 export class SalesService {
   private readonly logger = new Logger(SalesService.name);
 
-  constructor(
-    private readonly prisma: DatabaseService,
-    private readonly ledgerService: LedgerService,
-  ) {}
+  constructor(private readonly prisma: DatabaseService,
+    private readonly ledgerService: LedgerService,private readonly notificationQueue: NotificationQueueService) {}
 
   /**
    * Helper to generate a deterministic hash of the creation payload
@@ -438,6 +437,18 @@ export class SalesService {
             timeout: 30000,
           }
         );
+
+        await this.notificationQueue.enqueue({
+          userId,
+          organizationId,
+          type: 'SALE_COMPLETED',
+          title: 'Sale Completed',
+          message: `Sale ${sale.saleNumber} has been successfully completed.`,
+          entityType: 'Sale',
+          entityId: sale.id,
+        });
+
+        return sale;
       } catch (error: any) {
         const isSaleNumberCollision =
           error.code === 'P2002' &&

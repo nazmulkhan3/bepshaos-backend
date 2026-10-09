@@ -32,6 +32,8 @@ import { LedgerModule } from './modules/ledger/ledger.module.js';
 import { ExpensesModule } from './modules/expenses/expenses.module.js';
 import { InvoiceModule } from './modules/invoice/invoice.module.js';
 import { ReceiptModule } from './modules/receipt/receipt.module.js';
+import { ReportModule } from './modules/report/report.module.js';
+import { NotificationModule } from './modules/notification/notification.module.js';
 
 @Module({
   imports: [
@@ -72,6 +74,8 @@ import { ReceiptModule } from './modules/receipt/receipt.module.js';
     ExpensesModule,
     InvoiceModule,
     ReceiptModule,
+    ReportModule,
+    NotificationModule,
   ],
   controllers: [AppController],
   providers: [

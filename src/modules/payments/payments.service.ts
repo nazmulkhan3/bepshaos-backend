@@ -1,3 +1,4 @@
+import { NotificationQueueService } from '../notification/notification.queue.service.js';
 import {
   Injectable,
   NotFoundException,
@@ -16,10 +17,8 @@ import { LedgerService } from '../ledger/ledger.service.js';
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
 
-  constructor(
-    private readonly prisma: DatabaseService,
-    private readonly ledgerService: LedgerService,
-  ) {}
+  constructor(private readonly prisma: DatabaseService,
+    private readonly ledgerService: LedgerService,private readonly notificationQueue: NotificationQueueService) {}
 
   private generateRequestHash(dto: CreatePaymentDto): string {
     const normalized = {
@@ -331,12 +330,23 @@ export class PaymentsService {
               tx,
             );
 
-            return payment;
           },
           {
             isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
           }
         );
+
+        await this.notificationQueue.enqueue({
+          userId,
+          organizationId,
+          type: payment.direction === 'RECEIVED' ? 'PAYMENT_RECEIVED' : 'PAYMENT_SENT',
+          title: payment.direction === 'RECEIVED' ? 'Payment Received' : 'Payment Sent',
+          message: `Payment ${payment.paymentNumber} of amount ${payment.amount} has been processed.`,
+          entityType: 'Payment',
+          entityId: payment.id,
+        });
+
+        return payment;
       } catch (error) {
         if (
           error instanceof Prisma.PrismaClientKnownRequestError &&

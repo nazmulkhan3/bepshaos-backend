@@ -1,3 +1,4 @@
+import { NotificationQueueService } from '../notification/notification.queue.service.js';
 import {
   Injectable,
   NotFoundException,
@@ -19,10 +20,8 @@ import { Decimal } from 'decimal.js';
 export class ExpensesService {
   private readonly logger = new Logger(ExpensesService.name);
 
-  constructor(
-    private readonly prisma: DatabaseService,
-    private readonly ledgerService: LedgerService,
-  ) {}
+  constructor(private readonly prisma: DatabaseService,
+    private readonly ledgerService: LedgerService,private readonly notificationQueue: NotificationQueueService) {}
 
   // ─────────────────────────────────────────────────────────────────────────
   // CATEGORY MANAGEMENT
@@ -277,6 +276,18 @@ export class ExpensesService {
 
           return expense;
         });
+        
+        await this.notificationQueue.enqueue({
+          userId,
+          organizationId,
+          type: 'EXPENSE_CREATED',
+          title: 'Expense Created',
+          message: `Expense ${expense.expenseNumber} has been successfully recorded.`,
+          entityType: 'Expense',
+          entityId: expense.id,
+        });
+
+        return expense;
       } catch (error) {
         if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
           retryCount++;
