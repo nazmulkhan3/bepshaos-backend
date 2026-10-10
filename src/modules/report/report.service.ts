@@ -432,14 +432,17 @@ export class ReportService {
     const lines = await this.prisma.journalEntryLine.findMany({
       where,
       include: {
-        account: { select: { type: true, name: true, code: true } }
+        account: { select: { type: true, name: true, code: true, category: true } }
       }
     });
 
     let totalRevenue = new Prisma.Decimal(0);
     let totalExpense = new Prisma.Decimal(0);
+    let totalCogs = new Prisma.Decimal(0);
+    let operatingExpense = new Prisma.Decimal(0);
+
     const revenueDetails: Record<string, { name: string, code: string, amount: Prisma.Decimal }> = {};
-    const expenseDetails: Record<string, { name: string, code: string, amount: Prisma.Decimal }> = {};
+    const expenseDetails: Record<string, { name: string, code: string, amount: Prisma.Decimal, isCogs: boolean }> = {};
 
     for (const line of lines) {
       if (line.account.type === 'REVENUE') {
@@ -452,14 +455,25 @@ export class ReportService {
       } else if (line.account.type === 'EXPENSE') {
         const amt = line.debit.sub(line.credit);
         totalExpense = totalExpense.add(amt);
+        const isCogs = line.account.category === 'COST_OF_GOODS_SOLD' || line.account.code === '5100';
+        if (isCogs) {
+          totalCogs = totalCogs.add(amt);
+        } else {
+          operatingExpense = operatingExpense.add(amt);
+        }
+
         if (!expenseDetails[line.accountId]) {
-          expenseDetails[line.accountId] = { name: line.account.name, code: line.account.code, amount: new Prisma.Decimal(0) };
+          expenseDetails[line.accountId] = { name: line.account.name, code: line.account.code, amount: new Prisma.Decimal(0), isCogs };
         }
         expenseDetails[line.accountId].amount = expenseDetails[line.accountId].amount.add(amt);
       }
     }
 
+    const grossProfit = totalRevenue.sub(totalCogs);
     const netProfit = totalRevenue.sub(totalExpense);
+    const grossMarginPercent = totalRevenue.gt(0)
+      ? grossProfit.dividedBy(totalRevenue).mul(100).toNumber()
+      : 0;
 
     return {
       revenue: {
@@ -470,6 +484,10 @@ export class ReportService {
         total: totalExpense.toNumber(),
         breakdown: Object.values(expenseDetails).map(x => ({ ...x, amount: x.amount.toNumber() })),
       },
+      cogs: totalCogs.toNumber(),
+      operatingExpense: operatingExpense.toNumber(),
+      grossProfit: grossProfit.toNumber(),
+      grossMarginPercent: Number(grossMarginPercent.toFixed(2)),
       netProfit: netProfit.toNumber(),
     };
   }

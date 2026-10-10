@@ -34,4 +34,9 @@ export class PurchaseQueryDto extends PageOptionsDto {
   @IsOptional()
   @IsEnum(PurchaseSortBy)
   sortBy?: PurchaseSortBy;
+
+  @ApiPropertyOptional({ enum: ['asc', 'desc'], default: 'desc' })
+  @IsOptional()
+  @IsEnum(['asc', 'desc'] as const)
+  sortOrder?: 'asc' | 'desc' = 'desc';
 }

@@ -53,9 +53,9 @@ describe('AdminController (Platform Admin API Integration)', () => {
       };
       adminService.listOrganizations.mockResolvedValueOnce(mockResult);
 
-      const res = await controller.listOrganizations({ page: 1, limit: 10 });
+      const res = await controller.listOrganizations({ offset: 0, limit: 10 } as any);
 
-      expect(adminService.listOrganizations).toHaveBeenCalledWith({ page: 1, limit: 10 });
+      expect(adminService.listOrganizations).toHaveBeenCalledWith({ offset: 0, limit: 10 });
       expect(res.success).toBe(true);
       expect(res.data.length).toBe(1);
     });
@@ -91,9 +91,9 @@ describe('AdminController (Platform Admin API Integration)', () => {
       };
       auditLogService.queryLogs.mockResolvedValueOnce(mockLogs);
 
-      const res = await controller.queryAuditLogs({ page: 1, limit: 20 });
+      const res = await controller.queryAuditLogs({ offset: 0, limit: 20 } as any);
 
-      expect(auditLogService.queryLogs).toHaveBeenCalledWith({ page: 1, limit: 20 });
+      expect(auditLogService.queryLogs).toHaveBeenCalledWith({ offset: 0, limit: 20 });
       expect(res.success).toBe(true);
       expect(res.data.length).toBe(1);
     });

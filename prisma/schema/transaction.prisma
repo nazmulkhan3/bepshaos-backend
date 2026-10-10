@@ -53,6 +53,7 @@ model SaleItem {
   unitPrice      Decimal  @db.Decimal(19, 4)
   discountAmount Decimal  @default(0) @map("discount") @db.Decimal(19, 4)
   taxAmount      Decimal  @default(0) @map("tax") @db.Decimal(19, 4)
+  costPrice      Decimal  @default(0) @db.Decimal(19, 4)
   lineTotal      Decimal  @db.Decimal(19, 4)
   createdAt      DateTime @default(now())
 
@@ -78,6 +79,23 @@ model Purchase {
   tax            Decimal        @default(0) @db.Decimal(19, 4)
   total          Decimal        @default(0) @db.Decimal(19, 4)
   paidAmount     Decimal        @default(0) @db.Decimal(19, 4)
+
+  // Phase 2B: Landed / Acquisition Costs (capitalizable, allocated to inventory)
+  // These are costs of bringing goods to branch — not operating expenses.
+  // Third-party costs (e.g. freight paid to a carrier, not the supplier) should
+  // also be recorded as separate Expense entries; set landedCostPaidToSupplier=false
+  // on those charges so they do NOT add to Accounts Payable here.
+  freight              Decimal @default(0) @db.Decimal(19, 4) // Transport/delivery
+  loading              Decimal @default(0) @db.Decimal(19, 4) // Loading/unloading labour
+  handling             Decimal @default(0) @db.Decimal(19, 4) // Handling/storage
+  clearingCharges      Decimal @default(0) @db.Decimal(19, 4) // Import clearing/customs
+  otherCosts           Decimal @default(0) @db.Decimal(19, 4) // Any other capitalizable costs
+  landedCostTotal      Decimal @default(0) @db.Decimal(19, 4) // = freight+loading+handling+clearing+other
+  capitalizableCost    Decimal @default(0) @db.Decimal(19, 4) // = subtotal - discount + tax + landedCostTotal
+  linkedExpenseId      String? // Optional ID of a separately recorded Expense to capitalize into this purchase
+  // NOTE: total (payable to supplier) = subtotal - discount + tax
+  //       landedCostTotal may include third-party charges not owed to supplier
+
   status         PurchaseStatus @default(COMPLETED)
   note           String?
   idempotencyKey String?
@@ -112,6 +130,13 @@ model PurchaseItem {
   discount   Decimal  @default(0) @db.Decimal(19, 4)
   tax        Decimal  @default(0) @db.Decimal(19, 4)
   lineTotal  Decimal  @db.Decimal(19, 4)
+
+  // Phase 2B: Allocated landed cost and total capitalizable cost for this item
+  // landedCostAllocation = proportional share of purchase.landedCostTotal for this line
+  // totalCapitalizableCost = lineTotal + landedCostAllocation (used for MWAC update)
+  landedCostAllocation   Decimal @default(0) @db.Decimal(19, 4)
+  totalCapitalizableCost Decimal @default(0) @db.Decimal(19, 4)
+
   createdAt  DateTime @default(now())
 
   purchase Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)

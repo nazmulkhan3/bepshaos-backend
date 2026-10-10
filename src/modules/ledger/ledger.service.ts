@@ -33,6 +33,7 @@ export const SYSTEM_ACCOUNTS = [
   { code: '3000', name: 'Owner Equity',        type: AccountType.EQUITY,    category: AccountCategory.OWNER_EQUITY },
   { code: '4000', name: 'Sales Revenue',       type: AccountType.REVENUE,   category: AccountCategory.SALES_REVENUE },
   { code: '5000', name: 'General Expense',     type: AccountType.EXPENSE,   category: AccountCategory.GENERAL_EXPENSE },
+  { code: '5100', name: 'Cost of Goods Sold',  type: AccountType.EXPENSE,   category: AccountCategory.COST_OF_GOODS_SOLD },
 ];
 
 // PaymentMethod → ledger account category mapping
@@ -548,7 +549,14 @@ export class LedgerService {
 
   async postSaleJournal(
     organizationId: string,
-    sale: { id: string; branchId: string; totalAmount: any; customerId?: string | null; createdBy?: string | null },
+    sale: {
+      id: string;
+      branchId: string;
+      totalAmount: any;
+      cogsAmount?: any;
+      customerId?: string | null;
+      createdBy?: string | null;
+    },
     tx: Prisma.TransactionClient,
   ) {
     const amount = new Decimal(sale.totalAmount.toString());
@@ -558,6 +566,43 @@ export class LedgerService {
       ? AccountCategory.ACCOUNTS_RECEIVABLE
       : AccountCategory.CASH;
 
+    const lines: PostJournalParams['lines'] = [
+      {
+        accountCategory: debitCategory,
+        debit: amount.toFixed(4),
+        credit: '0.0000',
+        customerId: sale.customerId || undefined,
+        description: 'Sale debit',
+      },
+      {
+        accountCategory: AccountCategory.SALES_REVENUE,
+        debit: '0.0000',
+        credit: amount.toFixed(4),
+        description: 'Sales Revenue',
+      },
+    ];
+
+    // Perpetual Inventory Cost of Goods Sold (COGS)
+    if (sale.cogsAmount) {
+      const cogs = new Decimal(sale.cogsAmount.toString());
+      if (cogs.gt(0)) {
+        lines.push(
+          {
+            accountCategory: AccountCategory.COST_OF_GOODS_SOLD,
+            debit: cogs.toFixed(4),
+            credit: '0.0000',
+            description: 'Cost of Goods Sold',
+          },
+          {
+            accountCategory: AccountCategory.INVENTORY,
+            debit: '0.0000',
+            credit: cogs.toFixed(4),
+            description: 'Inventory Asset reduction',
+          },
+        );
+      }
+    }
+
     return this.postJournal(
       {
         organizationId,
@@ -566,21 +611,7 @@ export class LedgerService {
         sourceType: JournalSourceType.SALE,
         sourceId: sale.id,
         createdBy: sale.createdBy || undefined,
-        lines: [
-          {
-            accountCategory: debitCategory,
-            debit: amount.toFixed(4),
-            credit: '0.0000',
-            customerId: sale.customerId || undefined,
-            description: 'Sale debit',
-          },
-          {
-            accountCategory: AccountCategory.SALES_REVENUE,
-            debit: '0.0000',
-            credit: amount.toFixed(4),
-            description: 'Sales Revenue',
-          },
-        ],
+        lines,
       },
       tx,
     );
@@ -592,10 +623,67 @@ export class LedgerService {
 
   async postPurchaseJournal(
     organizationId: string,
-    purchase: { id: string; branchId: string; total: any; supplierId?: string | null; createdBy?: string | null },
+    purchase: {
+      id: string;
+      branchId: string;
+      total: any;
+      capitalizableCost?: any;
+      landedCostTotal?: any;
+      linkedExpenseAccountId?: string | null;
+      supplierId?: string | null;
+      createdBy?: string | null;
+    },
     tx: Prisma.TransactionClient,
   ) {
-    const amount = new Decimal(purchase.total.toString());
+    const supplierPayable = new Decimal(purchase.total.toString());
+    const capCost = purchase.capitalizableCost
+      ? new Decimal(purchase.capitalizableCost.toString())
+      : supplierPayable;
+    const landedCostTotal = purchase.landedCostTotal
+      ? new Decimal(purchase.landedCostTotal.toString())
+      : new Decimal(0);
+
+    // ── Journal Lines ──────────────────────────────────────────────────────
+    // Debit Inventory Asset with FULL capitalizable cost (merchandise + landed costs)
+    // Credit Accounts Payable with ONLY the supplier payable amount
+    // If landedCostTotal > 0 and the landed cost was paid as a separate Expense,
+    // we credit that Expense account to reclassify it into Inventory, preventing double-counting.
+    // Otherwise we credit Cash/Bank for the third-party payment.
+
+    const lines: PostJournalParams['lines'] = [
+      {
+        accountCategory: AccountCategory.INVENTORY,
+        debit: capCost.toFixed(4),
+        credit: '0.0000',
+        description: 'Inventory asset (merchandise + landed costs)',
+      },
+      {
+        accountCategory: AccountCategory.ACCOUNTS_PAYABLE,
+        debit: '0.0000',
+        credit: supplierPayable.toFixed(4),
+        supplierId: purchase.supplierId || undefined,
+        description: 'Accounts Payable to supplier',
+      },
+    ];
+
+    // If landed costs exist, balance the journal
+    if (landedCostTotal.gt(0)) {
+      if (purchase.linkedExpenseAccountId) {
+        lines.push({
+          accountId: purchase.linkedExpenseAccountId,
+          debit: '0.0000',
+          credit: landedCostTotal.toFixed(4),
+          description: 'Reclassify operating expense to capitalized inventory asset',
+        });
+      } else {
+        lines.push({
+          accountCategory: AccountCategory.CASH,
+          debit: '0.0000',
+          credit: landedCostTotal.toFixed(4),
+          description: 'Cash paid for landed costs (freight/loading/handling/etc.)',
+        });
+      }
+    }
 
     return this.postJournal(
       {
@@ -605,25 +693,12 @@ export class LedgerService {
         sourceType: JournalSourceType.PURCHASE,
         sourceId: purchase.id,
         createdBy: purchase.createdBy || undefined,
-        lines: [
-          {
-            accountCategory: AccountCategory.INVENTORY,
-            debit: amount.toFixed(4),
-            credit: '0.0000',
-            description: 'Inventory',
-          },
-          {
-            accountCategory: AccountCategory.ACCOUNTS_PAYABLE,
-            debit: '0.0000',
-            credit: amount.toFixed(4),
-            supplierId: purchase.supplierId || undefined,
-            description: 'Accounts Payable',
-          },
-        ],
+        lines,
       },
       tx,
     );
   }
+
 
   // ─────────────────────────────────────────────────────────────────────────
   // PAYMENT POSTING

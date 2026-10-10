@@ -30,6 +30,13 @@ export class InventoryController {
     return this.inventoryService.findAllMovements(ctx.organizationId, query);
   }
 
+  @Get('valuation-dry-run')
+  @RequirePermissions('inventory:read')
+  @ApiOperation({ summary: 'Generate dry-run report for legacy zero-cost stock valuation without modifying records' })
+  getValuationDryRun(@CurrentOrganization() ctx: OrganizationContext) {
+    return this.inventoryService.getLegacyValuationDryRun(ctx.organizationId);
+  }
+
   @Get(':id')
   @RequirePermissions('inventory:read')
   @ApiOperation({ summary: 'Get inventory by ID' })

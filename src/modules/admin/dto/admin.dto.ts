@@ -1,4 +1,5 @@
 import { IsString, IsOptional, IsEnum, IsNumber, Min } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { OrganizationStatus, SubscriptionStatus } from '@prisma/client';
 
@@ -15,12 +16,14 @@ export class AdminOrganizationQueryDto {
 
   @ApiPropertyOptional({ description: 'Page limit', default: 50 })
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(1)
   limit?: number;
 
   @ApiPropertyOptional({ description: 'Page offset', default: 0 })
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   offset?: number;
@@ -83,12 +86,14 @@ export class AdminAuditLogQueryDto {
 
   @ApiPropertyOptional({ description: 'Page limit', default: 50 })
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(1)
   limit?: number;
 
   @ApiPropertyOptional({ description: 'Page offset', default: 0 })
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   offset?: number;

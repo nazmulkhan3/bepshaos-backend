@@ -12,6 +12,7 @@ import { PasswordResetConfirmDto } from './dto/password-reset-confirm.dto.js';
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
 import { CurrentUser } from './decorators/current-user.decorator.js';
 import { Public } from './decorators/public.decorator.js';
+import { ConfigService } from '@nestjs/config';
 import { DatabaseService } from '../../database/database.service.js';
 
 @ApiTags('Authentication')
@@ -20,6 +21,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly db: DatabaseService, // For /me endpoint
+    private readonly configService: ConfigService,
   ) {}
 
   @Public()
@@ -96,7 +98,40 @@ export class AuthController {
         status: true,
       },
     });
-    return dbUser;
+
+    if (!dbUser) {
+      return null;
+    }
+
+    const adminEmailsRaw =
+      this.configService.get<string>('platformAdmin.emails') ||
+      process.env.PLATFORM_ADMIN_EMAILS ||
+      '';
+    const adminIdsRaw =
+      this.configService.get<string>('platformAdmin.userIds') ||
+      process.env.PLATFORM_ADMIN_USER_IDS ||
+      '';
+
+    const allowedEmails = adminEmailsRaw
+      .split(',')
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
+
+    const allowedIds = adminIdsRaw
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean);
+
+    const userEmail = dbUser.email?.toLowerCase();
+    const isPlatformAdmin = Boolean(
+      (userEmail && allowedEmails.includes(userEmail)) ||
+      allowedIds.includes(dbUser.id)
+    );
+
+    return {
+      ...dbUser,
+      isPlatformAdmin,
+    };
   }
 
   @Public()

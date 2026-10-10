@@ -285,8 +285,8 @@ export class InventoryService {
     }
 
     // Lock the row exclusively for this transaction
-    const lockedRows = await tx.$queryRaw<{ id: string, quantity: any }[]>`
-      SELECT id, quantity 
+    const lockedRows = await tx.$queryRaw<{ id: string, quantity: any, averageCost: any }[]>`
+      SELECT id, quantity, "averageCost" 
       FROM "Inventory" 
       WHERE id = ${inventory.id} 
       FOR UPDATE
@@ -296,7 +296,10 @@ export class InventoryService {
       throw new NotFoundException(`Inventory record could not be locked`);
     }
 
-    return lockedRows[0];
+    return {
+      ...lockedRows[0],
+      productPurchasePrice: product.purchasePrice,
+    };
   }
 
   private async processStockUpdate(
@@ -312,11 +315,18 @@ export class InventoryService {
   ) {
     const afterQty = currentQty.plus(delta);
 
+    // If stock-in is performed and inventory averageCost is zero, initialize with product reference purchasePrice if available
+    let averageCost = new Prisma.Decimal(lockedInventory.averageCost || 0);
+    if (delta.gt(0) && averageCost.isZero() && lockedInventory.productPurchasePrice) {
+      averageCost = new Prisma.Decimal(lockedInventory.productPurchasePrice);
+    }
+
     // Update inventory
     const updatedInventory = await tx.inventory.update({
       where: { id: lockedInventory.id },
       data: {
         quantity: afterQty.toNumber(),
+        averageCost: averageCost.toFixed(4),
       },
     });
 
@@ -356,5 +366,117 @@ export class InventoryService {
     });
 
     return movement;
+  }
+
+  /**
+   * Phase 2B: Legacy Stock Valuation Dry-Run Report
+   * Identifies historical inventory rows where averageCost = 0, calculates proposed
+   * valuation based on verified historical purchase cost (or catalog purchase price),
+   * computes valuation deltas and required reconciliation journal decisions WITHOUT
+   * modifying any database records.
+   */
+  async getLegacyValuationDryRun(organizationId: string) {
+    const zeroCostInventories = await this.prisma.inventory.findMany({
+      where: {
+        organizationId,
+        averageCost: 0,
+        quantity: { gt: 0 },
+      },
+      include: {
+        product: { select: { id: true, name: true, sku: true, purchasePrice: true } },
+        branch: { select: { id: true, name: true, code: true } },
+      },
+      orderBy: [{ branchId: 'asc' }, { productId: 'asc' }],
+    });
+
+    const affectedStock = [];
+    let totalProposedValuation = new Prisma.Decimal(0);
+    let manualReviewCount = 0;
+
+    for (const item of zeroCostInventories) {
+      const qty = new Prisma.Decimal(item.quantity);
+
+      // Look up historical purchase items for this product
+      const latestPurchaseItem = await this.prisma.purchaseItem.findFirst({
+        where: {
+          productId: item.productId,
+          purchase: { organizationId, branchId: item.branchId, status: 'COMPLETED' },
+        },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          quantity: true,
+          unitCost: true,
+          totalCapitalizableCost: true,
+          createdAt: true,
+          purchase: { select: { purchaseNumber: true } },
+        },
+      });
+
+      let proposedUnitCost: Prisma.Decimal;
+      let costSource: 'HISTORICAL_PURCHASE' | 'CATALOG_PURCHASE_PRICE' | 'UNRESOLVED_ZERO';
+
+      if (
+        latestPurchaseItem &&
+        latestPurchaseItem.totalCapitalizableCost &&
+        Number(latestPurchaseItem.totalCapitalizableCost) > 0 &&
+        Number(latestPurchaseItem.quantity) > 0
+      ) {
+        proposedUnitCost = new Prisma.Decimal(latestPurchaseItem.totalCapitalizableCost).dividedBy(
+          latestPurchaseItem.quantity,
+        );
+        costSource = 'HISTORICAL_PURCHASE';
+      } else if (latestPurchaseItem && Number(latestPurchaseItem.unitCost) > 0) {
+        proposedUnitCost = new Prisma.Decimal(latestPurchaseItem.unitCost);
+        costSource = 'HISTORICAL_PURCHASE';
+      } else if (item.product.purchasePrice && Number(item.product.purchasePrice) > 0) {
+        proposedUnitCost = new Prisma.Decimal(item.product.purchasePrice);
+        costSource = 'CATALOG_PURCHASE_PRICE';
+        manualReviewCount++;
+      } else {
+        proposedUnitCost = new Prisma.Decimal(0);
+        costSource = 'UNRESOLVED_ZERO';
+        manualReviewCount++;
+      }
+
+      const currentValuation = new Prisma.Decimal(0);
+      const proposedValuation = qty.mul(proposedUnitCost);
+      const valuationDifference = proposedValuation.minus(currentValuation);
+
+      totalProposedValuation = totalProposedValuation.plus(proposedValuation);
+
+      affectedStock.push({
+        inventoryId: item.id,
+        branch: { id: item.branch.id, name: item.branch.name, code: item.branch.code },
+        product: { id: item.product.id, name: item.product.name, sku: item.product.sku },
+        quantity: qty.toNumber(),
+        currentAverageCost: '0.0000',
+        currentValuation: '0.0000',
+        proposedAverageCost: proposedUnitCost.toFixed(4),
+        proposedValuation: proposedValuation.toFixed(4),
+        valuationDifference: valuationDifference.toFixed(4),
+        costSource,
+        referencePurchase: latestPurchaseItem?.purchase?.purchaseNumber || null,
+        reconciliationDecision: valuationDifference.gt(0)
+          ? {
+              action: 'MANUAL_RECONCILIATION_JOURNAL_REQUIRED',
+              debitAccount: '1200 Inventory Asset',
+              creditAccount: '3000 Owner Equity (Opening Balance / Prior Period Adjustment)',
+              amount: valuationDifference.toFixed(4),
+            }
+          : { action: 'NO_ADJUSTMENT_REQUIRED', amount: '0.0000' },
+      });
+    }
+
+    return {
+      dryRun: true,
+      executionTimestamp: new Date().toISOString(),
+      disclaimer: 'DRY RUN ONLY — No database records or financial journals were created or modified.',
+      summary: {
+        totalAffectedItems: affectedStock.length,
+        totalProposedValuation: totalProposedValuation.toFixed(4),
+        manualReviewRequiredCount: manualReviewCount,
+      },
+      affectedStock,
+    };
   }
 }

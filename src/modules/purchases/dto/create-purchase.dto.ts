@@ -79,6 +79,65 @@ export class CreatePurchaseDto {
   @Type(() => Number)
   tax?: number;
 
+  // ── Phase 2B: Purchase Landed / Acquisition Costs ──────────────────────────
+  // These are capitalizable costs of acquiring and transporting goods.
+  // They increase inventory valuation (MWAC) but are NOT necessarily added to
+  // the supplier payable (e.g. freight paid to a third-party carrier).
+  // For third-party costs, also record a separate Expense entry to avoid
+  // double-counting as an operating expense.
+
+  @ApiPropertyOptional({
+    description: 'Freight / transport cost capitalizable to inventory (default: 0)',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  freight?: number;
+
+  @ApiPropertyOptional({
+    description: 'Loading / unloading labour cost capitalizable to inventory (default: 0)',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  loading?: number;
+
+  @ApiPropertyOptional({
+    description: 'Handling / storage cost capitalizable to inventory (default: 0)',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  handling?: number;
+
+  @ApiPropertyOptional({
+    description: 'Import clearing / customs charges capitalizable to inventory (default: 0)',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  clearingCharges?: number;
+
+  @ApiPropertyOptional({
+    description: 'Any other capitalizable acquisition costs (default: 0)',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  otherCosts?: number;
+
+  @ApiPropertyOptional({
+    description: 'Optional ID of a separately recorded Expense to capitalize into this purchase, preventing duplicate operating expense recognition',
+  })
+  @IsOptional()
+  @IsUUID()
+  linkedExpenseId?: string;
+
   @ApiPropertyOptional({ description: 'Optional note' })
   @IsOptional()
   @IsString()

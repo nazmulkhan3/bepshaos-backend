@@ -181,6 +181,7 @@ model Inventory {
   productId        String
   quantity         Decimal @default(0) @db.Decimal(19, 4) // Decimal in case of fractional units (kg, L)
   reservedQuantity Decimal @default(0) @db.Decimal(19, 4)
+  averageCost      Decimal @default(0) @db.Decimal(19, 4)
 
   updatedAt DateTime @updatedAt
   createdAt DateTime @default(now())

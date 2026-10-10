@@ -147,6 +147,7 @@ enum AccountCategory {
 
   // EXPENSE
   GENERAL_EXPENSE
+  COST_OF_GOODS_SOLD
 }
 
 enum JournalEntryStatus {

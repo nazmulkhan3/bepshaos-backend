@@ -42,7 +42,7 @@ describe('NotificationProcessor (Tenant Isolation & Idempotency)', () => {
         data: {
           userId: 'user-intruder',
           organizationId: 'org-victim',
-          type: NotificationType.INFO,
+          type: NotificationType.SYSTEM,
           title: 'Alert',
           message: 'Cross tenant attempt',
         },
@@ -63,7 +63,7 @@ describe('NotificationProcessor (Tenant Isolation & Idempotency)', () => {
         data: {
           userId: 'user-valid',
           organizationId: 'org-valid',
-          type: NotificationType.INFO,
+          type: NotificationType.SYSTEM,
           title: 'New Sale',
           message: 'Sale created',
         },

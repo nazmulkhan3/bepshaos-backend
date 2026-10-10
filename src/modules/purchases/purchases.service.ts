@@ -42,6 +42,13 @@ export class PurchasesService {
         .sort((a, b) => a.productId.localeCompare(b.productId)),
       discount: Number(dto.discount || 0),
       tax: Number(dto.tax || 0),
+      // Phase 2B: include landed costs in hash
+      freight:         Number(dto.freight || 0),
+      loading:         Number(dto.loading || 0),
+      handling:        Number(dto.handling || 0),
+      clearingCharges: Number(dto.clearingCharges || 0),
+      otherCosts:      Number(dto.otherCosts || 0),
+      linkedExpenseId: dto.linkedExpenseId || null,
       note: dto.note || null,
     };
     return crypto.createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
@@ -197,7 +204,7 @@ export class PurchasesService {
             }
 
             const sortedItems = [...dto.items].sort((a, b) => a.productId.localeCompare(b.productId));
-            const lockedInventories: Record<string, { id: string; quantity: Prisma.Decimal }> = {};
+            const lockedInventories: Record<string, { id: string; quantity: Prisma.Decimal; averageCost: Prisma.Decimal }> = {};
 
             for (const item of sortedItems) {
               let inventory = await tx.inventory.findFirst({
@@ -237,8 +244,8 @@ export class PurchasesService {
                 throw new NotFoundException(`Inventory record could not be found or created for product ${item.productId}`);
               }
 
-              const lockedRows = await tx.$queryRaw<{ id: string; quantity: any }[]>`
-                SELECT id, quantity 
+              const lockedRows = await tx.$queryRaw<{ id: string; quantity: any; averageCost: any }[]>`
+                SELECT id, quantity, "averageCost" 
                 FROM "Inventory" 
                 WHERE id = ${inventory.id} 
                 FOR UPDATE
@@ -250,20 +257,39 @@ export class PurchasesService {
 
               const locked = lockedRows[0];
               const currentQty = new Prisma.Decimal(locked.quantity);
+              const currentAverageCost = new Prisma.Decimal(locked.averageCost || 0);
 
               lockedInventories[item.productId] = {
                 id: locked.id,
                 quantity: currentQty,
+                averageCost: currentAverageCost,
               };
             }
 
             const purchaseNumber = await this.generatePurchaseNumber(organizationId, tx);
 
+            // ── Validate linked expense if supplied ────────────────────────────
+            let linkedExpenseAccountId: string | null = null;
+            if (dto.linkedExpenseId) {
+              const linkedExpense = await tx.expense.findFirst({
+                where: { id: dto.linkedExpenseId, organizationId },
+                include: { category: true },
+              });
+              if (!linkedExpense) {
+                throw new NotFoundException(`Linked expense ${dto.linkedExpenseId} not found`);
+              }
+              if (linkedExpense.status !== 'COMPLETED') {
+                throw new ConflictException('Linked expense must have COMPLETED status to be capitalized');
+              }
+              linkedExpenseAccountId = linkedExpense.category.expenseAccountId;
+            }
+
+            // ── Step 1: Calculate raw line items and merchandise subtotals ─────
             let calculatedSubtotal = new Prisma.Decimal(0);
             let calculatedItemDiscount = new Prisma.Decimal(0);
             let calculatedItemTax = new Prisma.Decimal(0);
 
-            const preparedItems = sortedItems.map((item) => {
+            const rawItems = sortedItems.map((item) => {
               const product = productMap.get(item.productId)!;
               const unitCost = new Prisma.Decimal(item.unitCost);
               const qty = new Prisma.Decimal(item.quantity);
@@ -271,9 +297,9 @@ export class PurchasesService {
               const itemTax = new Prisma.Decimal(item.tax ?? 0);
 
               const itemSubtotal = qty.mul(unitCost);
-              const lineTotal = itemSubtotal.minus(itemDiscount).plus(itemTax);
+              const rawLineTotal = itemSubtotal.minus(itemDiscount).plus(itemTax);
 
-              if (lineTotal.isNegative()) {
+              if (rawLineTotal.isNegative()) {
                 throw new BadRequestException(`Line total cannot be negative for product ${product.name}`);
               }
 
@@ -285,9 +311,10 @@ export class PurchasesService {
                 productId: item.productId,
                 quantity: qty,
                 unitCost,
-                discount: itemDiscount,
-                tax: itemTax,
-                lineTotal,
+                itemSubtotal,
+                rawDiscount: itemDiscount,
+                rawTax: itemTax,
+                rawLineTotal,
               };
             });
 
@@ -296,12 +323,115 @@ export class PurchasesService {
 
             const totalDiscount = calculatedItemDiscount.plus(overallDiscount);
             const totalTax = calculatedItemTax.plus(overallTax);
+            // total = merchandise total owed to the supplier
             const totalAmount = calculatedSubtotal.minus(totalDiscount).plus(totalTax);
 
             if (totalAmount.isNegative()) {
               throw new BadRequestException('Total purchase amount cannot be negative');
             }
 
+            // ── Step 2: Allocate header discount and header tax across items ────
+            // Ensures sum(lineTotal) == totalAmount exactly so stock valuation reconciles with AP
+            const sumRawLineTotals = rawItems.reduce((acc, pi) => acc.plus(pi.rawLineTotal), new Prisma.Decimal(0));
+            const sumRawQuantities = rawItems.reduce((acc, pi) => acc.plus(pi.quantity), new Prisma.Decimal(0));
+
+            const itemsWithAdjustedTotals = rawItems.map((item) => {
+              let lineDiscount = item.rawDiscount;
+              let lineTax = item.rawTax;
+
+              if (sumRawLineTotals.gt(0)) {
+                if (overallDiscount.gt(0)) {
+                  const share = overallDiscount.mul(item.rawLineTotal).dividedBy(sumRawLineTotals).toDecimalPlaces(4);
+                  lineDiscount = lineDiscount.plus(share);
+                }
+                if (overallTax.gt(0)) {
+                  const share = overallTax.mul(item.rawLineTotal).dividedBy(sumRawLineTotals).toDecimalPlaces(4);
+                  lineTax = lineTax.plus(share);
+                }
+              } else if (sumRawQuantities.gt(0)) {
+                if (overallDiscount.gt(0)) {
+                  const share = overallDiscount.mul(item.quantity).dividedBy(sumRawQuantities).toDecimalPlaces(4);
+                  lineDiscount = lineDiscount.plus(share);
+                }
+                if (overallTax.gt(0)) {
+                  const share = overallTax.mul(item.quantity).dividedBy(sumRawQuantities).toDecimalPlaces(4);
+                  lineTax = lineTax.plus(share);
+                }
+              }
+
+              const lineTotal = item.itemSubtotal.minus(lineDiscount).plus(lineTax);
+              return {
+                ...item,
+                discount: lineDiscount,
+                tax: lineTax,
+                lineTotal,
+              };
+            });
+
+            // Adjust any rounding residual on lineTotal to match totalAmount exactly
+            if (itemsWithAdjustedTotals.length > 0) {
+              const sumLineTotals = itemsWithAdjustedTotals.reduce((acc, pi) => acc.plus(pi.lineTotal), new Prisma.Decimal(0));
+              const residual = totalAmount.minus(sumLineTotals);
+              itemsWithAdjustedTotals[itemsWithAdjustedTotals.length - 1].lineTotal =
+                itemsWithAdjustedTotals[itemsWithAdjustedTotals.length - 1].lineTotal.plus(residual);
+            }
+
+            // ── Step 3: Phase 2B Landed Cost Calculation ────────────────────────
+            const freight         = new Prisma.Decimal(dto.freight ?? 0);
+            const loading         = new Prisma.Decimal(dto.loading ?? 0);
+            const handling        = new Prisma.Decimal(dto.handling ?? 0);
+            const clearingCharges = new Prisma.Decimal(dto.clearingCharges ?? 0);
+            const otherCosts      = new Prisma.Decimal(dto.otherCosts ?? 0);
+
+            const landedCostTotal = freight
+              .plus(loading)
+              .plus(handling)
+              .plus(clearingCharges)
+              .plus(otherCosts);
+
+            if (landedCostTotal.isNegative()) {
+              throw new BadRequestException('Landed cost total cannot be negative');
+            }
+
+            // capitalizableCost = supplier total payable + landed acquisition costs capitalised
+            const capitalizableCost = totalAmount.plus(landedCostTotal);
+
+            // ── Step 4: Allocate landed costs proportionally to items ───────────
+            // Method: Proportional allocation by effective line value (or by quantity if line totals sum to 0)
+            const sumEffectiveLines = itemsWithAdjustedTotals.reduce((acc, pi) => acc.plus(pi.lineTotal), new Prisma.Decimal(0));
+
+            const itemsWithAllocation = itemsWithAdjustedTotals.map((pi) => {
+              let allocation = new Prisma.Decimal(0);
+              if (landedCostTotal.gt(0)) {
+                if (sumEffectiveLines.gt(0)) {
+                  allocation = landedCostTotal.mul(pi.lineTotal).dividedBy(sumEffectiveLines).toDecimalPlaces(4);
+                } else if (sumRawQuantities.gt(0)) {
+                  allocation = landedCostTotal.mul(pi.quantity).dividedBy(sumRawQuantities).toDecimalPlaces(4);
+                }
+              }
+              return {
+                ...pi,
+                allocation,
+                totalCapitalizableCost: pi.lineTotal.plus(allocation),
+              };
+            });
+
+            // Fix any rounding residual on allocation so sum(allocation) == landedCostTotal exactly
+            if (itemsWithAllocation.length > 0 && landedCostTotal.gt(0)) {
+              const sumAllocated = itemsWithAllocation.reduce(
+                (acc, pi) => acc.plus(pi.allocation),
+                new Prisma.Decimal(0),
+              );
+              const residual = landedCostTotal.minus(sumAllocated);
+              itemsWithAllocation[itemsWithAllocation.length - 1].allocation =
+                itemsWithAllocation[itemsWithAllocation.length - 1].allocation.plus(residual);
+              itemsWithAllocation[itemsWithAllocation.length - 1].totalCapitalizableCost =
+                itemsWithAllocation[itemsWithAllocation.length - 1].lineTotal.plus(
+                  itemsWithAllocation[itemsWithAllocation.length - 1].allocation,
+                );
+            }
+
+            // ── Step 5: Persist Purchase & PurchaseItems ────────────────────────
             const purchase = await tx.purchase.create({
               data: {
                 organizationId,
@@ -313,19 +443,31 @@ export class PurchasesService {
                 discount: totalDiscount,
                 tax: totalTax,
                 total: totalAmount,
-                paidAmount: totalAmount, // Per requirements: do not add speculative logic, default handled schema
+                paidAmount: totalAmount,
+                // Phase 2B: Landed costs
+                freight,
+                loading,
+                handling,
+                clearingCharges,
+                otherCosts,
+                landedCostTotal,
+                capitalizableCost,
+                linkedExpenseId: dto.linkedExpenseId || null,
                 note: dto.note || null,
                 idempotencyKey: dto.idempotencyKey || null,
                 requestHash,
                 createdBy: userId,
                 items: {
-                  create: preparedItems.map((pi) => ({
+                  create: itemsWithAllocation.map((pi) => ({
                     productId: pi.productId,
                     quantity: pi.quantity,
                     unitCost: pi.unitCost,
                     discount: pi.discount,
                     tax: pi.tax,
                     lineTotal: pi.lineTotal,
+                    // Phase 2B: per-item landed cost allocation
+                    landedCostAllocation:   pi.allocation,
+                    totalCapitalizableCost: pi.totalCapitalizableCost,
                   })),
                 },
               },
@@ -340,13 +482,26 @@ export class PurchasesService {
               },
             });
 
-            for (const pi of preparedItems) {
+            // ── Step 6: Update Moving Weighted-Average Cost (MWAC) ───────────────
+            for (const pi of itemsWithAllocation) {
               const locked = lockedInventories[pi.productId];
-              const newQty = locked.quantity.plus(pi.quantity); // Purchases INCREASE inventory (STOCK_IN)
+              const newQty = locked.quantity.plus(pi.quantity);
+
+              // MWAC uses totalCapitalizableCost (net line value + allocated landed cost)
+              const totalCapCost = pi.totalCapitalizableCost;
+              const netCostPerUnit = totalCapCost.dividedBy(pi.quantity);
+              let newAverageCost = netCostPerUnit;
+              if (locked.quantity.gt(0)) {
+                const currentValuation = locked.quantity.mul(locked.averageCost);
+                newAverageCost = currentValuation.plus(totalCapCost).dividedBy(newQty);
+              }
 
               await tx.inventory.update({
                 where: { id: locked.id },
-                data: { quantity: newQty.toNumber() },
+                data: {
+                  quantity: newQty.toNumber(),
+                  averageCost: newAverageCost.toFixed(4),
+                },
               });
 
               await tx.inventoryMovement.create({
@@ -366,6 +521,21 @@ export class PurchasesService {
               });
             }
 
+            // Annotate linked expense to prevent duplicate expense recognition
+            if (dto.linkedExpenseId) {
+              const exp = await tx.expense.findUnique({ where: { id: dto.linkedExpenseId } });
+              if (exp) {
+                await tx.expense.update({
+                  where: { id: exp.id },
+                  data: {
+                    reference: exp.reference
+                      ? `${exp.reference} [Capitalized into ${purchaseNumber}]`
+                      : `Capitalized into ${purchaseNumber}`,
+                  },
+                });
+              }
+            }
+
             await tx.auditLog.create({
               data: {
                 organizationId,
@@ -378,18 +548,24 @@ export class PurchasesService {
                   branchId: purchase.branchId,
                   supplierId: purchase.supplierId,
                   total: purchase.total.toNumber(),
+                  capitalizableCost: purchase.capitalizableCost.toNumber(),
+                  landedCostTotal: purchase.landedCostTotal.toNumber(),
+                  linkedExpenseId: purchase.linkedExpenseId,
                   itemCount: purchase.items.length,
                 },
               },
             });
 
-            // Post purchase journal (double-entry ledger)
+            // ── Step 7: Post double-entry purchase journal ──────────────────────
             await this.ledgerService.postPurchaseJournal(
               organizationId,
               {
                 id: purchase.id,
                 branchId: purchase.branchId,
                 total: purchase.total,
+                capitalizableCost: purchase.capitalizableCost,
+                landedCostTotal: purchase.landedCostTotal,
+                linkedExpenseAccountId,
                 supplierId: purchase.supplierId,
                 createdBy: userId,
               },
@@ -606,8 +782,8 @@ export class PurchasesService {
             throw new NotFoundException(`Inventory record could not be found for product ${item.productId}`);
           }
 
-          const lockedRows = await tx.$queryRaw<{ id: string; quantity: any }[]>`
-            SELECT id, quantity 
+          const lockedRows = await tx.$queryRaw<{ id: string; quantity: any; averageCost: any }[]>`
+            SELECT id, quantity, "averageCost" 
             FROM "Inventory" 
             WHERE id = ${inventory.id} 
             FOR UPDATE
@@ -618,6 +794,7 @@ export class PurchasesService {
           }
 
           const currentQty = new Prisma.Decimal(lockedRows[0].quantity);
+          const currentAverageCost = new Prisma.Decimal(lockedRows[0].averageCost || 0);
           const deductQty = new Prisma.Decimal(item.quantity);
 
           if (currentQty.lt(deductQty)) {
@@ -626,11 +803,24 @@ export class PurchasesService {
             );
           }
 
-          const newQty = currentQty.minus(deductQty); // Purchases DECREASE inventory on cancel (STOCK_OUT)
+          const newQty = currentQty.minus(deductQty);
+          let newAverageCost = currentAverageCost;
+          if (newQty.isZero()) {
+            newAverageCost = new Prisma.Decimal(0);
+          } else {
+            const itemCapCost = new Prisma.Decimal(item.totalCapitalizableCost || item.lineTotal);
+            const remainingValuation = currentQty.mul(currentAverageCost).minus(itemCapCost);
+            if (remainingValuation.gt(0)) {
+              newAverageCost = remainingValuation.dividedBy(newQty);
+            }
+          }
 
           await tx.inventory.update({
             where: { id: inventory.id },
-            data: { quantity: newQty.toNumber() },
+            data: {
+              quantity: newQty.toNumber(),
+              averageCost: newAverageCost.toFixed(4),
+            },
           });
 
           await tx.inventoryMovement.create({
@@ -648,6 +838,19 @@ export class PurchasesService {
               createdBy: userId,
             },
           });
+        }
+
+        // Release annotation on linked expense if one was capitalized
+        if (purchase.linkedExpenseId) {
+          const exp = await tx.expense.findUnique({ where: { id: purchase.linkedExpenseId } });
+          if (exp && exp.reference?.includes(`[Capitalized into ${purchase.purchaseNumber}]`)) {
+            await tx.expense.update({
+              where: { id: exp.id },
+              data: {
+                reference: exp.reference.replace(` [Capitalized into ${purchase.purchaseNumber}]`, '').trim() || null,
+              },
+            });
+          }
         }
 
         const updatedPurchase = await tx.purchase.update({

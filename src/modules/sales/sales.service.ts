@@ -217,7 +217,7 @@ export class SalesService {
 
             // Deterministic row locking (lexicographical by productId to prevent deadlocks)
             const sortedItems = [...dto.items].sort((a, b) => a.productId.localeCompare(b.productId));
-            const lockedInventories: Record<string, { id: string; quantity: Prisma.Decimal }> = {};
+            const lockedInventories: Record<string, { id: string; quantity: Prisma.Decimal; averageCost: Prisma.Decimal }> = {};
 
             for (const item of sortedItems) {
               let inventory = await tx.inventory.findFirst({
@@ -258,8 +258,8 @@ export class SalesService {
               }
 
               // Lock row exclusively
-              const lockedRows = await tx.$queryRaw<{ id: string; quantity: any }[]>`
-                SELECT id, quantity 
+              const lockedRows = await tx.$queryRaw<{ id: string; quantity: any; averageCost: any }[]>`
+                SELECT id, quantity, "averageCost" 
                 FROM "Inventory" 
                 WHERE id = ${inventory.id} 
                 FOR UPDATE
@@ -271,6 +271,7 @@ export class SalesService {
 
               const locked = lockedRows[0];
               const currentQty = new Prisma.Decimal(locked.quantity);
+              const currentAverageCost = new Prisma.Decimal(locked.averageCost || 0);
               const requestedQty = new Prisma.Decimal(item.quantity);
 
               if (currentQty.lt(requestedQty)) {
@@ -283,6 +284,7 @@ export class SalesService {
               lockedInventories[item.productId] = {
                 id: locked.id,
                 quantity: currentQty,
+                averageCost: currentAverageCost,
               };
             }
 
@@ -293,6 +295,8 @@ export class SalesService {
             let calculatedSubtotal = new Prisma.Decimal(0);
             let calculatedItemDiscount = new Prisma.Decimal(0);
             let calculatedItemTax = new Prisma.Decimal(0);
+
+            let calculatedTotalCogs = new Prisma.Decimal(0);
 
             const preparedItems = sortedItems.map((item) => {
               const product = productMap.get(item.productId)!;
@@ -311,6 +315,12 @@ export class SalesService {
                 throw new BadRequestException(`Line total cannot be negative for product ${product.name}`);
               }
 
+              // Moving Weighted Average Cost per unit at moment of sale
+              const locked = lockedInventories[item.productId];
+              const unitCost = locked?.averageCost ?? new Prisma.Decimal(0);
+              const lineCogs = qty.mul(unitCost);
+              calculatedTotalCogs = calculatedTotalCogs.plus(lineCogs);
+
               calculatedSubtotal = calculatedSubtotal.plus(itemSubtotal);
               calculatedItemDiscount = calculatedItemDiscount.plus(itemDiscount);
               calculatedItemTax = calculatedItemTax.plus(itemTax);
@@ -319,6 +329,7 @@ export class SalesService {
                 productId: item.productId,
                 quantity: qty,
                 unitPrice,
+                costPrice: unitCost,
                 discountAmount: itemDiscount,
                 taxAmount: itemTax,
                 lineTotal,
@@ -369,6 +380,7 @@ export class SalesService {
                     productId: pi.productId,
                     quantity: pi.quantity,
                     unitPrice: pi.unitPrice,
+                    costPrice: pi.costPrice,
                     discountAmount: pi.discountAmount,
                     taxAmount: pi.taxAmount,
                     lineTotal: pi.lineTotal,
@@ -431,13 +443,14 @@ export class SalesService {
               },
             });
 
-            // Post sale journal (double-entry ledger)
+            // Post sale journal (double-entry ledger: revenue + COGS/inventory)
             await this.ledgerService.postSaleJournal(
               organizationId,
               {
                 id: sale.id,
                 branchId: sale.branchId,
                 totalAmount: sale.totalAmount,
+                cogsAmount: calculatedTotalCogs,
                 customerId: sale.customerId,
                 createdBy: userId,
               },
