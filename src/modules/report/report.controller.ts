@@ -85,4 +85,13 @@ export class ReportController {
     const data = await this.reportService.getDashboard(ctx.organizationId, query);
     return { success: true, data };
   }
+
+  @Get('product-profitability')
+  async getProductProfitability(
+    @CurrentOrganization() ctx: OrganizationContext,
+    @Query(new ValidationPipe({ transform: true })) query: import('./dto/get-product-profitability-query.dto.js').GetProductProfitabilityQueryDto,
+  ) {
+    const data = await this.reportService.getProductProfitability(ctx.organizationId, query);
+    return { success: true, data };
+  }
 }

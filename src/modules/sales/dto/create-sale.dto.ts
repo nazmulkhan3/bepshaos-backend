@@ -79,6 +79,13 @@ export class CreateSaleDto {
   @Type(() => Number)
   taxAmount?: number;
 
+  @ApiPropertyOptional({ description: 'Amount paid immediately upon sale. If omitted, defaults to full total amount. Set 0 for credit / bakite sale.' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  paidAmount?: number;
+
   @ApiPropertyOptional({ description: 'Optional note' })
   @IsOptional()
   @IsString()

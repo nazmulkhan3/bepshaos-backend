@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../../database/database.service.js';
 import { GetReportQueryDto } from './dto/get-report-query.dto.js';
+import { GetProductProfitabilityQueryDto } from './dto/get-product-profitability-query.dto.js';
 import { Prisma } from '@prisma/client';
 
 @Injectable()
@@ -507,4 +508,366 @@ export class ReportService {
       estimatedInventoryValue: inventory.current.estimatedValue,
     };
   }
+
+  /**
+   * Phase 2D: Actual Product Profit & Loss Analytics
+   * Calculates actual revenue, COGS snapshots, gross profit, variable selling expense attribution,
+   * contribution profit, and operational overhead distribution.
+   */
+  async getProductProfitability(organizationId: string, query: GetProductProfitabilityQueryDto) {
+    // 1. Build Sales Filter (Completed sales only; cancelled sales excluded to prevent phantom revenue)
+    const saleWhere: Prisma.SaleWhereInput = {
+      organizationId,
+      status: 'COMPLETED',
+    };
+
+    if (query.branchId) {
+      saleWhere.branchId = query.branchId;
+    }
+
+    if (query.startDate || query.endDate) {
+      saleWhere.createdAt = {};
+      if (query.startDate) saleWhere.createdAt.gte = new Date(query.startDate);
+      if (query.endDate) saleWhere.createdAt.lte = new Date(query.endDate);
+    }
+
+    // 2. Query SaleItems with product metadata and category
+    const saleItemWhere: Prisma.SaleItemWhereInput = {
+      sale: saleWhere,
+    };
+
+    if (query.productId) {
+      saleItemWhere.productId = query.productId;
+    }
+
+    if (query.categoryId) {
+      saleItemWhere.product = { categoryId: query.categoryId };
+    }
+
+    const saleItems = await this.prisma.saleItem.findMany({
+      where: saleItemWhere,
+      include: {
+        product: {
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            barcode: true,
+            categoryId: true,
+            purchasePrice: true,
+            category: { select: { id: true, name: true } },
+          },
+        },
+        sale: {
+          select: {
+            id: true,
+            saleNumber: true,
+            branchId: true,
+            createdAt: true,
+          },
+        },
+      },
+    });
+
+    // 3. Query Posted Actual Expenses during the same period and branch scope
+    const expenseWhere: Prisma.ExpenseWhereInput = {
+      organizationId,
+      status: 'COMPLETED',
+    };
+
+    if (query.branchId) {
+      expenseWhere.branchId = query.branchId;
+    }
+
+    if (query.startDate || query.endDate) {
+      expenseWhere.expenseDate = {};
+      if (query.startDate) expenseWhere.expenseDate.gte = new Date(query.startDate);
+      if (query.endDate) expenseWhere.expenseDate.lte = new Date(query.endDate);
+    }
+
+    const expenses = await this.prisma.expense.findMany({
+      where: expenseWhere,
+      include: {
+        category: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            account: { select: { code: true, category: true } },
+          },
+        },
+      },
+    });
+
+    // Double-counting prevention: Identify purchase capitalized expenses (e.g. linked freight/customs)
+    const linkedExpensePurchases = await this.prisma.purchase.findMany({
+      where: {
+        organizationId,
+        linkedExpenseId: { not: null },
+      },
+      select: { linkedExpenseId: true },
+    });
+    const capitalizedExpenseIds = new Set(
+      linkedExpensePurchases.map((p) => p.linkedExpenseId).filter(Boolean) as string[]
+    );
+
+    // Classify non-capitalized actual expenses into variable selling vs fixed operating overhead
+    let totalSellingExpenses = new Prisma.Decimal(0);
+    let totalOverheadExpenses = new Prisma.Decimal(0);
+    const sellingExpenseBreakdown: Array<{ id: string; categoryName: string; amount: number; reference?: string | null }> = [];
+    const overheadExpenseBreakdown: Array<{ id: string; categoryName: string; amount: number; reference?: string | null }> = [];
+
+    for (const exp of expenses) {
+      // Exclude if already capitalized into inventory landed cost
+      if (capitalizedExpenseIds.has(exp.id)) {
+        continue;
+      }
+
+      const catName = exp.category.name.toLowerCase();
+      const catCode = exp.category.code.toLowerCase();
+      const isVariableSelling =
+        catName.includes('ad') ||
+        catName.includes('marketing') ||
+        catName.includes('campaign') ||
+        catName.includes('delivery') ||
+        catName.includes('shipping') ||
+        catName.includes('courier') ||
+        catName.includes('pack') ||
+        catName.includes('label') ||
+        catName.includes('commission') ||
+        catName.includes('gateway') ||
+        catName.includes('cod') ||
+        catCode.includes('sell') ||
+        catCode.includes('mkt');
+
+      if (isVariableSelling) {
+        totalSellingExpenses = totalSellingExpenses.plus(exp.amount);
+        sellingExpenseBreakdown.push({
+          id: exp.id,
+          categoryName: exp.category.name,
+          amount: Number(exp.amount),
+          reference: exp.reference || exp.expenseNumber,
+        });
+      } else {
+        totalOverheadExpenses = totalOverheadExpenses.plus(exp.amount);
+        overheadExpenseBreakdown.push({
+          id: exp.id,
+          categoryName: exp.category.name,
+          amount: Number(exp.amount),
+          reference: exp.reference || exp.expenseNumber,
+        });
+      }
+    }
+
+    // 4. Aggregate sales by product
+    const productStatsMap = new Map<
+      string,
+      {
+        productId: string;
+        productName: string;
+        sku: string | null;
+        barcode: string | null;
+        categoryId: string | null;
+        categoryName: string;
+        catalogReferencePrice: number;
+        unitsSold: Prisma.Decimal;
+        orderSet: Set<string>;
+        grossRevenue: Prisma.Decimal;
+        discountTotal: Prisma.Decimal;
+        netRevenue: Prisma.Decimal;
+        actualCogs: Prisma.Decimal;
+        hasZeroCostSale: boolean;
+      }
+    >();
+
+    let totalOrgUnitsSold = new Prisma.Decimal(0);
+    let totalOrgNetRevenue = new Prisma.Decimal(0);
+    const orgOrderSet = new Set<string>();
+
+    for (const item of saleItems) {
+      const pid = item.productId;
+      if (!productStatsMap.has(pid)) {
+        productStatsMap.set(pid, {
+          productId: pid,
+          productName: item.product.name,
+          sku: item.product.sku,
+          barcode: item.product.barcode,
+          categoryId: item.product.categoryId,
+          categoryName: item.product.category?.name || 'Uncategorized',
+          catalogReferencePrice: Number(item.product.purchasePrice || 0),
+          unitsSold: new Prisma.Decimal(0),
+          orderSet: new Set<string>(),
+          grossRevenue: new Prisma.Decimal(0),
+          discountTotal: new Prisma.Decimal(0),
+          netRevenue: new Prisma.Decimal(0),
+          actualCogs: new Prisma.Decimal(0),
+          hasZeroCostSale: false,
+        });
+      }
+
+      const stat = productStatsMap.get(pid)!;
+      const qty = new Prisma.Decimal(item.quantity);
+      const unitPrice = new Prisma.Decimal(item.unitPrice);
+      const discount = new Prisma.Decimal(item.discountAmount || 0);
+      const costPrice = new Prisma.Decimal(item.costPrice || 0);
+
+      const grossLine = qty.mul(unitPrice);
+      const netLine = new Prisma.Decimal(item.lineTotal);
+      const lineCogs = qty.mul(costPrice);
+
+      if (costPrice.isZero() && qty.gt(0)) {
+        stat.hasZeroCostSale = true;
+      }
+
+      stat.unitsSold = stat.unitsSold.plus(qty);
+      stat.orderSet.add(item.saleId);
+      stat.grossRevenue = stat.grossRevenue.plus(grossLine);
+      stat.discountTotal = stat.discountTotal.plus(discount);
+      stat.netRevenue = stat.netRevenue.plus(netLine);
+      stat.actualCogs = stat.actualCogs.plus(lineCogs);
+
+      totalOrgUnitsSold = totalOrgUnitsSold.plus(qty);
+      totalOrgNetRevenue = totalOrgNetRevenue.plus(netLine);
+      orgOrderSet.add(item.saleId);
+    }
+
+    const totalOrdersCount = orgOrderSet.size;
+
+    // 5. Allocation Rule Determination
+    const allocationRule = query.allocationRule || 'ACTUAL_UNITS';
+
+    // 6. Assemble Product P&L rows
+    const productRows = Array.from(productStatsMap.values()).map((stat) => {
+      const netRev = stat.netRevenue;
+      const cogs = stat.actualCogs;
+      const grossProfit = netRev.minus(cogs);
+      const grossMarginPct = netRev.gt(0)
+        ? grossProfit.dividedBy(netRev).mul(100).toNumber()
+        : 0;
+
+      // Attribution fraction
+      let fraction = new Prisma.Decimal(0);
+      if (allocationRule === 'ACTUAL_UNITS') {
+        fraction = totalOrgUnitsSold.gt(0) ? stat.unitsSold.dividedBy(totalOrgUnitsSold) : new Prisma.Decimal(0);
+      } else if (allocationRule === 'ORDER_COUNT') {
+        fraction = totalOrdersCount > 0 ? new Prisma.Decimal(stat.orderSet.size).dividedBy(totalOrdersCount) : new Prisma.Decimal(0);
+      } else if (allocationRule === 'REVENUE_SHARE') {
+        fraction = totalOrgNetRevenue.gt(0) ? stat.netRevenue.dividedBy(totalOrgNetRevenue) : new Prisma.Decimal(0);
+      }
+
+      const allocatedSellingExpense = totalSellingExpenses.mul(fraction);
+      const contributionProfit = grossProfit.minus(allocatedSellingExpense);
+      const contributionMarginPct = netRev.gt(0)
+        ? contributionProfit.dividedBy(netRev).mul(100).toNumber()
+        : 0;
+
+      const allocatedOverhead = totalOverheadExpenses.mul(fraction);
+      const netProfit = contributionProfit.minus(allocatedOverhead);
+      const netMarginPct = netRev.gt(0)
+        ? netProfit.dividedBy(netRev).mul(100).toNumber()
+        : 0;
+
+      const unitsNum = Number(stat.unitsSold);
+      const avgSellingPrice = unitsNum > 0 ? Number(stat.netRevenue.dividedBy(stat.unitsSold)) : 0;
+      const avgUnitCogs = unitsNum > 0 ? Number(stat.actualCogs.dividedBy(stat.unitsSold)) : 0;
+      const unitContribution = unitsNum > 0 ? Number(contributionProfit.dividedBy(stat.unitsSold)) : 0;
+
+      return {
+        productId: stat.productId,
+        productName: stat.productName,
+        sku: stat.sku,
+        barcode: stat.barcode,
+        categoryId: stat.categoryId,
+        categoryName: stat.categoryName,
+        catalogReferencePrice: stat.catalogReferencePrice,
+        unitsSold: unitsNum,
+        salesCount: stat.orderSet.size,
+        grossRevenue: Number(stat.grossRevenue),
+        discountTotal: Number(stat.discountTotal),
+        netRevenue: Number(stat.netRevenue),
+        actualCogs: Number(stat.actualCogs),
+        grossProfit: Number(grossProfit),
+        grossMarginPct: Number(grossMarginPct.toFixed(2)),
+        allocatedSellingExpense: Number(allocatedSellingExpense),
+        contributionProfit: Number(contributionProfit),
+        contributionMarginPct: Number(contributionMarginPct.toFixed(2)),
+        allocatedOverhead: Number(allocatedOverhead),
+        netProfit: Number(netProfit),
+        netMarginPct: Number(netMarginPct.toFixed(2)),
+        avgSellingPrice: Number(avgSellingPrice.toFixed(2)),
+        avgUnitCogs: Number(avgUnitCogs.toFixed(2)),
+        unitContribution: Number(unitContribution.toFixed(2)),
+        hasZeroCostSale: stat.hasZeroCostSale,
+        isProfitable: contributionProfit.gte(0),
+      };
+    });
+
+    // 7. Overall Summary
+    let totalGrossRev = 0;
+    let totalDiscounts = 0;
+    let totalNetRev = 0;
+    let totalActualCogs = 0;
+    let totalGrossProfit = 0;
+    let totalContributionProfit = 0;
+    let totalNetProfit = 0;
+    let profitableCount = 0;
+    let lossCount = 0;
+    let zeroCostCount = 0;
+
+    for (const r of productRows) {
+      totalGrossRev += r.grossRevenue;
+      totalDiscounts += r.discountTotal;
+      totalNetRev += r.netRevenue;
+      totalActualCogs += r.actualCogs;
+      totalGrossProfit += r.grossProfit;
+      totalContributionProfit += r.contributionProfit;
+      totalNetProfit += r.netProfit;
+
+      if (r.contributionProfit >= 0) {
+        profitableCount++;
+      } else {
+        lossCount++;
+      }
+      if (r.hasZeroCostSale) {
+        zeroCostCount++;
+      }
+    }
+
+    const overallGrossMarginPct = totalNetRev > 0 ? (totalGrossProfit / totalNetRev) * 100 : 0;
+    const overallContributionMarginPct = totalNetRev > 0 ? (totalContributionProfit / totalNetRev) * 100 : 0;
+    const overallNetMarginPct = totalNetRev > 0 ? (totalNetProfit / totalNetRev) * 100 : 0;
+
+    return {
+      summary: {
+        totalProductsCount: productRows.length,
+        profitableCount,
+        lossCount,
+        zeroCostCount,
+        totalUnitsSold: Number(totalOrgUnitsSold),
+        totalOrdersCount,
+        grossRevenue: Number(totalGrossRev.toFixed(2)),
+        discountTotal: Number(totalDiscounts.toFixed(2)),
+        netRevenue: Number(totalNetRev.toFixed(2)),
+        actualCogs: Number(totalActualCogs.toFixed(2)),
+        grossProfit: Number(totalGrossProfit.toFixed(2)),
+        grossMarginPct: Number(overallGrossMarginPct.toFixed(2)),
+        allocatedSellingExpenses: Number(totalSellingExpenses),
+        contributionProfit: Number(totalContributionProfit.toFixed(2)),
+        contributionMarginPct: Number(overallContributionMarginPct.toFixed(2)),
+        allocatedOverhead: Number(totalOverheadExpenses),
+        netProfit: Number(totalNetProfit.toFixed(2)),
+        netMarginPct: Number(overallNetMarginPct.toFixed(2)),
+        allocationRule,
+      },
+      expenseAttribution: {
+        totalSellingExpenses: Number(totalSellingExpenses),
+        sellingBreakdown: sellingExpenseBreakdown,
+        totalOverheadExpenses: Number(totalOverheadExpenses),
+        overheadBreakdown: overheadExpenseBreakdown,
+        capitalizedLandedExpensesExcluded: capitalizedExpenseIds.size,
+      },
+      products: productRows,
+    };
+  }
 }
+

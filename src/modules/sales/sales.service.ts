@@ -50,6 +50,7 @@ export class SalesService {
         .sort((a, b) => a.productId.localeCompare(b.productId)),
       discountAmount: Number(dto.discountAmount || 0),
       taxAmount: Number(dto.taxAmount || 0),
+      paidAmount: dto.paidAmount !== undefined ? Number(dto.paidAmount) : null,
       note: dto.note || null,
     };
     return crypto.createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
@@ -347,6 +348,26 @@ export class SalesService {
               throw new BadRequestException('Total sale amount cannot be negative');
             }
 
+            // Calculate paidAmount and dueAmount
+            let finalPaidAmount = totalAmount;
+            if (dto.paidAmount !== undefined) {
+              const reqPaid = new Prisma.Decimal(dto.paidAmount);
+              if (reqPaid.isNegative()) {
+                throw new BadRequestException('Paid amount cannot be negative');
+              }
+              if (reqPaid.gt(totalAmount)) {
+                throw new BadRequestException('Paid amount cannot exceed total sale amount');
+              }
+              finalPaidAmount = reqPaid;
+            }
+
+            // If there is any unpaid due (bakite sale), customer MUST be registered (cannot be walk-in)
+            if (finalPaidAmount.lt(totalAmount) && !dto.customerId) {
+              throw new BadRequestException(
+                'বাকি/ক্রেডিট বিক্রির জন্য কাস্টমার সিলেক্ট করা আবশ্যক (Walk-in কাস্টমারকে বাকিতে বিক্রি করা যাবে না)।'
+              );
+            }
+
             // Enforce SaaS Transaction Quota under Level-1 Organization row lock
             await this.subscriptionLimitService.enforceQuota(
               organizationId,
@@ -370,7 +391,7 @@ export class SalesService {
                 discountAmount: totalDiscount,
                 taxAmount: totalTax,
                 totalAmount,
-                paidAmount: totalAmount,
+                paidAmount: finalPaidAmount,
                 note: dto.note || null,
                 idempotencyKey: dto.idempotencyKey || null,
                 requestHash,
